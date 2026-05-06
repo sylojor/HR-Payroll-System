@@ -34,12 +34,22 @@ export async function GET() {
     const pendingLeaves = await db.leaveRequest.count({ where: { status: 'pending' } });
     const approvedLeaves = await db.leaveRequest.count({ where: { status: 'approved' } });
 
-    // Salary totals
-    const salaryComponents = await db.employeeSalaryComponent.findMany({
-      where: { component: { type: 'earning', category: 'basic' } },
-      include: { component: true },
+    // Salary totals - use employee basicSalary directly
+    const salaryAgg = await db.employee.aggregate({
+      _sum: { 
+        basicSalary: true, 
+        housingAllowance: true, 
+        transportAllowance: true, 
+        foodAllowance: true, 
+        otherAllowances: true 
+      },
+      where: { status: 'active' },
     });
-    const totalBasicSalaries = salaryComponents.reduce((sum, sc) => sum + sc.amount, 0);
+    const totalBasicSalaries = (salaryAgg._sum.basicSalary || 0) 
+      + (salaryAgg._sum.housingAllowance || 0) 
+      + (salaryAgg._sum.transportAllowance || 0) 
+      + (salaryAgg._sum.foodAllowance || 0) 
+      + (salaryAgg._sum.otherAllowances || 0);
 
     // Department distribution
     const departments = await db.department.findMany({

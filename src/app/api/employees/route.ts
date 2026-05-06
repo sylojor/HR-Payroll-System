@@ -12,7 +12,6 @@ export async function GET(request: Request) {
 
     const where: Record<string, unknown> = {};
     if (status) where.status = status;
-    else where.status = 'active';
 
     if (departmentId) where.departmentId = departmentId;
 

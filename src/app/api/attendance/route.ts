@@ -72,6 +72,15 @@ export async function POST(request: Request) {
     }
 
     const dateObj = new Date(date);
+    
+    // Check for duplicate record
+    const existing = await db.attendanceRecord.findUnique({
+      where: { employeeId_date: { employeeId, date: dateObj } }
+    });
+    if (existing) {
+      return NextResponse.json({ error: 'يوجد سجل حضور لهذا الموظف في هذا التاريخ بالفعل' }, { status: 409 });
+    }
+    
     const checkInObj = checkIn ? new Date(checkIn) : null;
     const checkOutObj = checkOut ? new Date(checkOut) : null;
 
