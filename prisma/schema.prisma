@@ -117,6 +117,24 @@ model Employee {
   emergencyContact String?
   emergencyPhone  String?
   notes           String?
+  // ===== Financial Info =====
+  basicSalary     Float   @default(0)       // الراتب الأساسي
+  housingAllowance Float  @default(0)       // بدل سكن
+  transportAllowance Float @default(0)      // بدل نقل
+  foodAllowance   Float   @default(0)       // بدل طعام
+  otherAllowances Float   @default(0)       // بدلات أخرى
+  // ===== Overtime & Work Info =====
+  maxOvertimeHours Float  @default(0)       // الحد الأقصى لساعات الأوفر تايم شهرياً
+  overtimeRate    Float   @default(1.5)     // سعر ساعة الأوفر تايم (مضاعف الراتب)
+  overtimeHourPrice Float @default(0)       // سعر ساعة الأوفر تايم (ثابت بالدينار)
+  // ===== Vacation Info =====
+  annualVacationDays Int  @default(14)      // أيام الإجازة السنوية
+  sickVacationDays   Int  @default(10)      // أيام الإجازة المرضية
+  usedVacationDays   Int  @default(0)       // أيام الإجازة المستخدمة
+  // ===== Deduction Rates =====
+  lateDeductionRate Float @default(0)       // خصم التأخير لكل دقيقة (دينار)
+  absenceDeductionRate Float @default(0)    // خصم الغياب لكل يوم (دينار)
+  // ===== Relationships =====
   managedDepartment Department? @relation("DepartmentManager")
   salaryComponents EmployeeSalaryComponent[]
   attendanceRecords AttendanceRecord[]

@@ -24,6 +24,7 @@ export async function GET(
                 position: { select: { title: true } },
                 bankName: true,
                 bankAccount: true,
+                iban: true,
               },
             },
           },

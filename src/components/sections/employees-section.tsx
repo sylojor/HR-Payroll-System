@@ -23,6 +23,7 @@ interface Employee {
   phone: string | null;
   status: string;
   hireDate: string;
+  endDate: string | null;
   departmentId: string | null;
   positionId: string | null;
   department: { id: string; name: string } | null;
@@ -36,6 +37,19 @@ interface Employee {
   iban: string | null;
   workScheduleId: string | null;
   fingerprintId: string | null;
+  basicSalary: number | null;
+  housingAllowance: number | null;
+  transportAllowance: number | null;
+  foodAllowance: number | null;
+  otherAllowances: number | null;
+  maxOvertimeHours: number | null;
+  overtimeRate: number | null;
+  overtimeHourPrice: number | null;
+  annualVacationDays: number | null;
+  sickVacationDays: number | null;
+  usedVacationDays: number | null;
+  lateDeductionRate: number | null;
+  absenceDeductionRate: number | null;
 }
 
 interface Department { id: string; name: string; }
@@ -49,9 +63,13 @@ const statusConfig: Record<string, { label: string; className: string }> = {
 
 const emptyForm = {
   employeeId: '', firstName: '', lastName: '', email: '', phone: '', gender: 'male',
-  departmentId: '', positionId: '', status: 'active', hireDate: '',
+  departmentId: '', positionId: '', status: 'active', hireDate: '', endDate: '',
   address: '', city: '', nationalId: '', bankName: '', bankAccount: '', iban: '',
   workScheduleId: '', fingerprintId: '',
+  basicSalary: '', housingAllowance: '', transportAllowance: '', foodAllowance: '', otherAllowances: '',
+  maxOvertimeHours: '', overtimeRate: '', overtimeHourPrice: '',
+  annualVacationDays: '', sickVacationDays: '', usedVacationDays: '',
+  lateDeductionRate: '', absenceDeductionRate: '',
 };
 
 export function EmployeesSection() {
@@ -115,9 +133,23 @@ export function EmployeesSection() {
       email: emp.email || '', phone: emp.phone || '', gender: emp.gender,
       departmentId: emp.departmentId || '', positionId: emp.positionId || '',
       status: emp.status, hireDate: emp.hireDate ? new Date(emp.hireDate).toISOString().split('T')[0] : '',
+      endDate: emp.endDate ? new Date(emp.endDate).toISOString().split('T')[0] : '',
       address: emp.address || '', city: emp.city || '', nationalId: emp.nationalId || '',
       bankName: emp.bankName || '', bankAccount: emp.bankAccount || '',
       iban: emp.iban || '', workScheduleId: emp.workScheduleId || '', fingerprintId: emp.fingerprintId || '',
+      basicSalary: emp.basicSalary ?? '',
+      housingAllowance: emp.housingAllowance ?? '',
+      transportAllowance: emp.transportAllowance ?? '',
+      foodAllowance: emp.foodAllowance ?? '',
+      otherAllowances: emp.otherAllowances ?? '',
+      maxOvertimeHours: emp.maxOvertimeHours ?? '',
+      overtimeRate: emp.overtimeRate ?? '',
+      overtimeHourPrice: emp.overtimeHourPrice ?? '',
+      annualVacationDays: emp.annualVacationDays ?? '',
+      sickVacationDays: emp.sickVacationDays ?? '',
+      usedVacationDays: emp.usedVacationDays ?? '',
+      lateDeductionRate: emp.lateDeductionRate ?? '',
+      absenceDeductionRate: emp.absenceDeductionRate ?? '',
     });
     setDialogOpen(true);
   };
@@ -126,13 +158,29 @@ export function EmployeesSection() {
     if (!form.firstName || !form.lastName) return;
     setSaving(true);
     try {
+      const payload = {
+        ...form,
+        basicSalary: form.basicSalary === '' ? null : Number(form.basicSalary),
+        housingAllowance: form.housingAllowance === '' ? null : Number(form.housingAllowance),
+        transportAllowance: form.transportAllowance === '' ? null : Number(form.transportAllowance),
+        foodAllowance: form.foodAllowance === '' ? null : Number(form.foodAllowance),
+        otherAllowances: form.otherAllowances === '' ? null : Number(form.otherAllowances),
+        maxOvertimeHours: form.maxOvertimeHours === '' ? null : Number(form.maxOvertimeHours),
+        overtimeRate: form.overtimeRate === '' ? null : Number(form.overtimeRate),
+        overtimeHourPrice: form.overtimeHourPrice === '' ? null : Number(form.overtimeHourPrice),
+        annualVacationDays: form.annualVacationDays === '' ? null : Number(form.annualVacationDays),
+        sickVacationDays: form.sickVacationDays === '' ? null : Number(form.sickVacationDays),
+        usedVacationDays: form.usedVacationDays === '' ? null : Number(form.usedVacationDays),
+        lateDeductionRate: form.lateDeductionRate === '' ? null : Number(form.lateDeductionRate),
+        absenceDeductionRate: form.absenceDeductionRate === '' ? null : Number(form.absenceDeductionRate),
+      };
       if (editingId) {
         await fetch(`/api/employees/${editingId}`, {
-          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form),
+          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
         });
       } else {
         await fetch('/api/employees', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form),
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
         });
       }
       setDialogOpen(false);
@@ -392,6 +440,9 @@ export function EmployeesSection() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div><Label>تاريخ التعيين</Label><Input type="date" value={form.hireDate} onChange={e => setForm({...form, hireDate: e.target.value})} /></div>
+                <div><Label>تاريخ الانتهاء</Label><Input type="date" value={form.endDate} onChange={e => setForm({...form, endDate: e.target.value})} /></div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
                 <div><Label>الحالة</Label>
                   <Select value={form.status} onValueChange={v => setForm({...form, status: v})}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
@@ -402,16 +453,69 @@ export function EmployeesSection() {
                     </SelectContent>
                   </Select>
                 </div>
+                <div><Label>رقم البصمة</Label><Input value={form.fingerprintId} onChange={e => setForm({...form, fingerprintId: e.target.value})} /></div>
               </div>
-              <div><Label>رقم البصمة</Label><Input value={form.fingerprintId} onChange={e => setForm({...form, fingerprintId: e.target.value})} /></div>
+
+              {/* Overtime */}
+              <div className="border-t pt-3 mt-3">
+                <p className="text-sm font-semibold text-muted-foreground mb-2">الأوفر تايم</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div><Label>الحد الأقصى لساعات الأوفر تايم (شهرياً)</Label><Input type="number" step="0.01" min="0" value={form.maxOvertimeHours} onChange={e => setForm({...form, maxOvertimeHours: e.target.value})} placeholder="0" /></div>
+                  <div><Label>مضاعف الأوفر تايم (1.5x)</Label><Input type="number" step="0.01" min="0" value={form.overtimeRate} onChange={e => setForm({...form, overtimeRate: e.target.value})} placeholder="1.5" /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 mt-3">
+                  <div><Label>سعر ساعة الأوفر تايم (د.أ)</Label><Input type="number" step="0.01" min="0" value={form.overtimeHourPrice} onChange={e => setForm({...form, overtimeHourPrice: e.target.value})} placeholder="0.00" /></div>
+                </div>
+              </div>
+
+              {/* Vacation */}
+              <div className="border-t pt-3 mt-3">
+                <p className="text-sm font-semibold text-muted-foreground mb-2">الإجازات</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div><Label>أيام الإجازة السنوية</Label><Input type="number" step="1" min="0" value={form.annualVacationDays} onChange={e => setForm({...form, annualVacationDays: e.target.value})} placeholder="14" /></div>
+                  <div><Label>أيام الإجازة المرضية</Label><Input type="number" step="1" min="0" value={form.sickVacationDays} onChange={e => setForm({...form, sickVacationDays: e.target.value})} placeholder="10" /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 mt-3">
+                  <div><Label>أيام الإجازة المستخدمة</Label><Input type="number" step="1" min="0" value={form.usedVacationDays} onChange={e => setForm({...form, usedVacationDays: e.target.value})} placeholder="0" /></div>
+                </div>
+              </div>
+
+              {/* Deductions */}
+              <div className="border-t pt-3 mt-3">
+                <p className="text-sm font-semibold text-muted-foreground mb-2">الخصومات</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div><Label>خصم التأخير لكل دقيقة (د.أ)</Label><Input type="number" step="0.01" min="0" value={form.lateDeductionRate} onChange={e => setForm({...form, lateDeductionRate: e.target.value})} placeholder="0.00" /></div>
+                  <div><Label>خصم الغياب لكل يوم (د.أ)</Label><Input type="number" step="0.01" min="0" value={form.absenceDeductionRate} onChange={e => setForm({...form, absenceDeductionRate: e.target.value})} placeholder="0.00" /></div>
+                </div>
+              </div>
             </TabsContent>
 
             <TabsContent value="financial" className="space-y-3 mt-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div><Label>اسم البنك</Label><Input value={form.bankName} onChange={e => setForm({...form, bankName: e.target.value})} /></div>
-                <div><Label>رقم الحساب</Label><Input value={form.bankAccount} onChange={e => setForm({...form, bankAccount: e.target.value})} /></div>
+              {/* Salary & Allowances */}
+              <div>
+                <p className="text-sm font-semibold text-muted-foreground mb-2">الراتب والبدلات</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div><Label>الراتب الأساسي (د.أ)</Label><Input type="number" step="0.01" min="0" value={form.basicSalary} onChange={e => setForm({...form, basicSalary: e.target.value})} placeholder="0.00" /></div>
+                  <div><Label>بدل السكن (د.أ)</Label><Input type="number" step="0.01" min="0" value={form.housingAllowance} onChange={e => setForm({...form, housingAllowance: e.target.value})} placeholder="0.00" /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 mt-3">
+                  <div><Label>بدل النقل (د.أ)</Label><Input type="number" step="0.01" min="0" value={form.transportAllowance} onChange={e => setForm({...form, transportAllowance: e.target.value})} placeholder="0.00" /></div>
+                  <div><Label>بدل الطعام (د.أ)</Label><Input type="number" step="0.01" min="0" value={form.foodAllowance} onChange={e => setForm({...form, foodAllowance: e.target.value})} placeholder="0.00" /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 mt-3">
+                  <div><Label>بدلات أخرى (د.أ)</Label><Input type="number" step="0.01" min="0" value={form.otherAllowances} onChange={e => setForm({...form, otherAllowances: e.target.value})} placeholder="0.00" /></div>
+                </div>
               </div>
-              <div><Label>رقم الآيبان</Label><Input value={form.iban} onChange={e => setForm({...form, iban: e.target.value})} /></div>
+
+              {/* Bank Info */}
+              <div className="border-t pt-3 mt-3">
+                <p className="text-sm font-semibold text-muted-foreground mb-2">معلومات البنك</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div><Label>اسم البنك</Label><Input value={form.bankName} onChange={e => setForm({...form, bankName: e.target.value})} /></div>
+                  <div><Label>رقم الحساب</Label><Input value={form.bankAccount} onChange={e => setForm({...form, bankAccount: e.target.value})} /></div>
+                </div>
+                <div className="mt-3"><Label>رقم الآيبان</Label><Input value={form.iban} onChange={e => setForm({...form, iban: e.target.value})} /></div>
+              </div>
             </TabsContent>
           </Tabs>
           <DialogFooter className="mt-4 gap-2">

@@ -48,6 +48,10 @@ export async function PUT(
       'gender', 'maritalStatus', 'address', 'city', 'country', 'photo', 'status',
       'departmentId', 'positionId', 'workScheduleId', 'fingerprintId',
       'bankName', 'bankAccount', 'iban', 'emergencyContact', 'emergencyPhone', 'notes',
+      'basicSalary', 'housingAllowance', 'transportAllowance', 'foodAllowance', 'otherAllowances',
+      'maxOvertimeHours', 'overtimeRate', 'overtimeHourPrice',
+      'annualVacationDays', 'sickVacationDays', 'usedVacationDays',
+      'lateDeductionRate', 'absenceDeductionRate',
     ];
 
     for (const field of allowedFields) {

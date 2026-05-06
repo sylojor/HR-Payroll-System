@@ -19,6 +19,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
+import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   User,
@@ -42,6 +43,10 @@ import {
   TrendingUp,
   TrendingDown,
   Minus,
+  Umbrella,
+  Zap,
+  AlarmClock,
+  CircleDollarSign,
 } from 'lucide-react';
 
 // ============ Types ============
@@ -93,6 +98,19 @@ interface EmployeeFull {
     friday: boolean;
     saturday: boolean;
   } | null;
+  basicSalary: number;
+  housingAllowance: number;
+  transportAllowance: number;
+  foodAllowance: number;
+  otherAllowances: number;
+  maxOvertimeHours: number;
+  overtimeRate: number;
+  overtimeHourPrice: number;
+  annualVacationDays: number;
+  sickVacationDays: number;
+  usedVacationDays: number;
+  lateDeductionRate: number;
+  absenceDeductionRate: number;
   salaryComponents: {
     id: string;
     amount: number;
@@ -349,12 +367,17 @@ export function EmployeeDetailDialog({ employeeId, open, onOpenChange }: Employe
     return d.getMonth() + 1 === parseInt(attendanceMonth) && d.getFullYear() === parseInt(attendanceYear);
   });
 
-  // Salary calculations
+  // Salary calculations - direct employee model fields
+  const directTotalSalary = emp
+    ? emp.basicSalary + emp.housingAllowance + emp.transportAllowance + emp.foodAllowance + emp.otherAllowances
+    : 0;
+
+  // Additional salary components from SalaryComponent relation
   const earnings = emp?.salaryComponents.filter(sc => sc.component.type === 'earning') || [];
   const deductions = emp?.salaryComponents.filter(sc => sc.component.type === 'deduction') || [];
-  const totalEarnings = earnings.reduce((sum, sc) => sum + sc.amount, 0);
+  const totalAdditionalEarnings = earnings.reduce((sum, sc) => sum + sc.amount, 0);
   const totalDeductions = deductions.reduce((sum, sc) => sum + sc.amount, 0);
-  const basicSalary = earnings.find(sc => sc.component.category === 'basic')?.amount || 0;
+  const totalEarnings = directTotalSalary + totalAdditionalEarnings;
 
   const fullName = emp ? `${emp.firstName} ${emp.lastName}` : '';
   const fullNameEn = emp?.firstNameEn && emp?.lastNameEn ? `${emp.firstNameEn} ${emp.lastNameEn}` : null;
@@ -533,9 +556,59 @@ export function EmployeeDetailDialog({ employeeId, open, onOpenChange }: Employe
                           <InfoRow icon={Building2} label="القسم" value={emp.department?.name} />
                           <InfoRow icon={Briefcase} label="المنصب" value={emp.position?.title} />
                           <InfoRow icon={CalendarDays} label="تاريخ التعيين" value={formatDate(emp.hireDate)} />
-                          {emp.endDate && <InfoRow icon={CalendarDays} label="تاريخ الانتهاء" value={formatDate(emp.endDate)} />}
+                          <InfoRow icon={CalendarDays} label="تاريخ الانتهاء" value={emp.endDate ? formatDate(emp.endDate) : undefined} />
                           <InfoRow icon={Fingerprint} label="رقم البصمة" value={emp.fingerprintId} />
                           <InfoRow icon={User} label="الحالة" value={statusConfig[emp.status]?.label || emp.status} />
+                        </CardContent>
+                      </Card>
+
+                      {/* Overtime & Deduction Rates */}
+                      <Card>
+                        <CardHeader className="pb-2 pt-4 px-4">
+                          <CardTitle className="text-sm font-semibold text-emerald-700 flex items-center gap-2">
+                            <AlarmClock className="h-4 w-4" />
+                            الأوفر تايم والخصومات
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="px-4 pb-4 space-y-1">
+                          <InfoRow icon={Zap} label="الحد الأقصى للأوفر تايم" value={emp.maxOvertimeHours > 0 ? `${emp.maxOvertimeHours} ساعة/شهر` : undefined} />
+                          <InfoRow icon={Zap} label="مضاعف الأوفر تايم" value={emp.overtimeRate > 0 ? `${emp.overtimeRate}x` : undefined} />
+                          <InfoRow icon={Zap} label="سعر ساعة الأوفر تايم" value={emp.overtimeHourPrice > 0 ? `${formatCurrency(emp.overtimeHourPrice)} دينار` : undefined} />
+                          <Separator className="my-2" />
+                          <InfoRow icon={CircleDollarSign} label="خصم التأخير" value={emp.lateDeductionRate > 0 ? `${formatCurrency(emp.lateDeductionRate)} دينار/دقيقة` : undefined} />
+                          <InfoRow icon={CircleDollarSign} label="خصم الغياب" value={emp.absenceDeductionRate > 0 ? `${formatCurrency(emp.absenceDeductionRate)} دينار/يوم` : undefined} />
+                        </CardContent>
+                      </Card>
+
+                      {/* Vacation Info */}
+                      <Card>
+                        <CardHeader className="pb-2 pt-4 px-4">
+                          <CardTitle className="text-sm font-semibold text-emerald-700 flex items-center gap-2">
+                            <Umbrella className="h-4 w-4" />
+                            معلومات الإجازات
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="px-4 pb-4 space-y-1">
+                          <InfoRow icon={CalendarDays} label="أيام الإجازة السنوية" value={`${emp.annualVacationDays} يوم`} />
+                          <InfoRow icon={CalendarDays} label="أيام الإجازة المرضية" value={`${emp.sickVacationDays} يوم`} />
+                          <InfoRow icon={CalendarDays} label="أيام الإجازة المستخدمة" value={`${emp.usedVacationDays} يوم`} />
+                          <div className="mt-2">
+                            <div className="flex items-center justify-between mb-1">
+                              <p className="text-xs text-muted-foreground">أيام الإجازة المتبقية</p>
+                              <p className="text-sm font-bold text-emerald-700">
+                                {Math.max(emp.annualVacationDays - emp.usedVacationDays, 0)} يوم
+                              </p>
+                            </div>
+                            <Progress
+                              value={emp.annualVacationDays > 0 ? Math.min((emp.usedVacationDays / emp.annualVacationDays) * 100, 100) : 0}
+                              className="h-2"
+                            />
+                            <p className="text-xs text-muted-foreground mt-1 text-right">
+                              {emp.annualVacationDays > 0
+                                ? `${Math.round((emp.usedVacationDays / emp.annualVacationDays) * 100)}% مستخدم`
+                                : 'غير محدد'}
+                            </p>
+                          </div>
                         </CardContent>
                       </Card>
 
@@ -624,12 +697,70 @@ export function EmployeeDetailDialog({ employeeId, open, onOpenChange }: Employe
                       </Card>
                     </div>
 
-                    {/* Earnings Table */}
+                    {/* Direct Salary Components Breakdown */}
+                    <Card>
+                      <CardHeader className="pb-2 pt-4 px-4">
+                        <CardTitle className="text-sm font-semibold text-emerald-700 flex items-center gap-2">
+                          <DollarSign className="h-4 w-4" />
+                          مكونات الراتب الشهري
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-0 pb-0">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="text-right">المكون</TableHead>
+                              <TableHead className="text-right">المبلغ (دينار)</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            <TableRow>
+                              <TableCell className="font-medium">الراتب الأساسي</TableCell>
+                              <TableCell className="font-mono text-emerald-700 font-semibold">
+                                {formatCurrency(emp.basicSalary)}
+                              </TableCell>
+                            </TableRow>
+                            <TableRow>
+                              <TableCell className="font-medium">بدل سكن</TableCell>
+                              <TableCell className="font-mono text-emerald-700 font-semibold">
+                                {formatCurrency(emp.housingAllowance)}
+                              </TableCell>
+                            </TableRow>
+                            <TableRow>
+                              <TableCell className="font-medium">بدل نقل</TableCell>
+                              <TableCell className="font-mono text-emerald-700 font-semibold">
+                                {formatCurrency(emp.transportAllowance)}
+                              </TableCell>
+                            </TableRow>
+                            <TableRow>
+                              <TableCell className="font-medium">بدل طعام</TableCell>
+                              <TableCell className="font-mono text-emerald-700 font-semibold">
+                                {formatCurrency(emp.foodAllowance)}
+                              </TableCell>
+                            </TableRow>
+                            <TableRow>
+                              <TableCell className="font-medium">بدلات أخرى</TableCell>
+                              <TableCell className="font-mono text-emerald-700 font-semibold">
+                                {formatCurrency(emp.otherAllowances)}
+                              </TableCell>
+                            </TableRow>
+                            <TableRow className="bg-emerald-50 font-bold">
+                              <TableCell>إجمالي الراتب الشهري</TableCell>
+                              <TableCell className="font-mono text-emerald-800 text-base">
+                                {formatCurrency(directTotalSalary)}
+                              </TableCell>
+                            </TableRow>
+                          </TableBody>
+                        </Table>
+                      </CardContent>
+                    </Card>
+
+                    {/* Additional Earnings (from SalaryComponent relation) */}
                     <Card>
                       <CardHeader className="pb-2 pt-4 px-4">
                         <CardTitle className="text-sm font-semibold text-emerald-700 flex items-center gap-2">
                           <TrendingUp className="h-4 w-4" />
-                          الاستحقاقات ({earnings.length})
+                          مكونات إضافية - استحقاقات ({earnings.length})
                         </CardTitle>
                       </CardHeader>
                       <CardContent className="px-0 pb-0">
@@ -646,7 +777,7 @@ export function EmployeeDetailDialog({ employeeId, open, onOpenChange }: Employe
                             {earnings.length === 0 ? (
                               <TableRow>
                                 <TableCell colSpan={4} className="text-center py-6 text-muted-foreground">
-                                  لا توجد استحقاقات
+                                  لا توجد استحقاقات إضافية
                                 </TableCell>
                               </TableRow>
                             ) : (
