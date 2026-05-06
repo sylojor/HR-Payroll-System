@@ -10,7 +10,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Search, Plus, Pencil, Trash2, ChevronLeft, ChevronRight, Users } from 'lucide-react';
+import { Search, Plus, Pencil, Trash2, ChevronLeft, ChevronRight, Users, Eye, FileText, Download, Loader2 } from 'lucide-react';
+import { EmployeeDetailDialog } from './employee-detail';
+import { downloadEmployeePDF } from '@/lib/pdf-client';
 
 interface Employee {
   id: string;
@@ -68,6 +70,9 @@ export function EmployeesSection() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [fetchVersion, setFetchVersion] = useState(0);
+  const [detailEmployeeId, setDetailEmployeeId] = useState<string | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [exportingId, setExportingId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -177,10 +182,19 @@ export function EmployeesSection() {
                 <p className="text-xs text-muted-foreground">{total.toLocaleString('ar-JO')} موظف</p>
               </div>
             </div>
-            <Button onClick={openAdd} className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2">
-              <Plus className="h-4 w-4" />
-              إضافة موظف
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button onClick={openAdd} className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2">
+                <Plus className="h-4 w-4" />
+                إضافة موظف
+              </Button>
+              <Button variant="outline" className="gap-2" onClick={async () => {
+                const { downloadAllEmployeesPDF } = await import('@/lib/pdf-client');
+                downloadAllEmployeesPDF();
+              }}>
+                <Download className="h-4 w-4" />
+                تصدير الكل PDF
+              </Button>
+            </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
             <div className="relative">
@@ -239,9 +253,9 @@ export function EmployeesSection() {
                   </TableRow>
                 ) : (
                   employees.map((emp) => (
-                    <TableRow key={emp.id} className="hover:bg-muted/50">
+                    <TableRow key={emp.id} className="hover:bg-muted/50 cursor-pointer" onClick={() => { setDetailEmployeeId(emp.id); setDetailOpen(true); }}>
                       <TableCell className="font-mono text-sm">{emp.employeeId}</TableCell>
-                      <TableCell className="font-medium">{emp.firstName} {emp.lastName}</TableCell>
+                      <TableCell className="font-medium text-emerald-700 hover:text-emerald-900 hover:underline">{emp.firstName} {emp.lastName}</TableCell>
                       <TableCell>{emp.department?.name || '—'}</TableCell>
                       <TableCell>{emp.position?.title || '—'}</TableCell>
                       <TableCell>
@@ -252,11 +266,32 @@ export function EmployeesSection() {
                       <TableCell className="text-sm text-muted-foreground">{emp.phone || '—'}</TableCell>
                       <TableCell className="text-sm">{new Date(emp.hireDate).toLocaleDateString('ar-JO')}</TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-1">
-                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(emp)}>
+                        <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50" onClick={() => { setDetailEmployeeId(emp.id); setDetailOpen(true); }} title="عرض التفاصيل">
+                            <Eye className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+                            disabled={exportingId === emp.id}
+                            onClick={async () => {
+                              setExportingId(emp.id);
+                              await downloadEmployeePDF(emp.id, `${emp.firstName} ${emp.lastName}`);
+                              setExportingId(null);
+                            }}
+                            title="تصدير PDF"
+                          >
+                            {exportingId === emp.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <FileText className="h-3.5 w-3.5" />
+                            )}
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(emp)} title="تعديل">
                             <Pencil className="h-3.5 w-3.5" />
                           </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-red-600 hover:text-red-700" onClick={() => handleDelete(emp.id)}>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-red-600 hover:text-red-700" onClick={() => handleDelete(emp.id)} title="حذف">
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         </div>
@@ -285,6 +320,13 @@ export function EmployeesSection() {
           )}
         </CardContent>
       </Card>
+
+      {/* Employee Detail Dialog */}
+      <EmployeeDetailDialog
+        employeeId={detailEmployeeId}
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+      />
 
       {/* Add/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

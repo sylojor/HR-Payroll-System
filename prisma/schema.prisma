@@ -371,6 +371,29 @@ model Notification {
 }
 
 // ============================================
+// License & Activation
+// ============================================
+model License {
+  id            String @id @default(cuid())
+  licenseKey    String @unique
+  companyName   String
+  companyEmail  String?
+  phone         String?
+  maxEmployees  Int @default(50)
+  maxDevices    Int @default(5)
+  modules       String @default("all") // JSON string of enabled modules
+  issuedAt      DateTime @default(now())
+  expiresAt     DateTime
+  isActive      Boolean @default(true)
+  activatedAt   DateTime?
+  machineId     String?  // Hardware fingerprint for machine binding
+  ipAddress     String?  // IP address of activation
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ============================================
 // Reports Cache
 // ============================================
 model Report {

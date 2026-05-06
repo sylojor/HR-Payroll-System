@@ -45,7 +45,9 @@ import {
   ChevronDown,
   ChevronUp,
   Loader2,
+  FileText,
 } from 'lucide-react';
+import { downloadPayrollPDF } from '@/lib/pdf-client';
 
 const formatCurrency = (amount: number) => {
   return amount.toLocaleString('ar-JO') + ' د.أ';
@@ -108,9 +110,14 @@ interface SalaryComponent {
 }
 
 export function PayrollSection() {
-  const now = new Date();
-  const [selectedMonth, setSelectedMonth] = useState(String(now.getMonth() + 1));
-  const [selectedYear, setSelectedYear] = useState(String(now.getFullYear()));
+  const [selectedMonth, setSelectedMonth] = useState('1');
+  const [selectedYear, setSelectedYear] = useState('2025');
+
+  useEffect(() => {
+    const now = new Date();
+    setSelectedMonth(String(now.getMonth() + 1));
+    setSelectedYear(String(now.getFullYear()));
+  }, []);
   const [payroll, setPayroll] = useState<Payroll | null>(null);
   const [summary, setSummary] = useState<{
     totalEarnings: number;
@@ -123,6 +130,7 @@ export function PayrollSection() {
   const [loading, setLoading] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [exporting, setExporting] = useState(false);
 
   // Salary components state
   const [components, setComponents] = useState<SalaryComponent[]>([]);
@@ -424,9 +432,18 @@ export function PayrollSection() {
                     <CheckCircle2 className="h-4 w-4 ml-1" />
                     صرف الكل
                   </Button>
-                  <Button variant="outline" size="sm">
-                    <Download className="h-4 w-4 ml-1" />
-                    تصدير القسائم
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={exporting}
+                    onClick={async () => {
+                      setExporting(true);
+                      await downloadPayrollPDF(parseInt(selectedMonth), parseInt(selectedYear));
+                      setExporting(false);
+                    }}
+                  >
+                    {exporting ? <Loader2 className="h-4 w-4 ml-1 animate-spin" /> : <FileText className="h-4 w-4 ml-1" />}
+                    {exporting ? 'جاري التصدير...' : 'تصدير PDF'}
                   </Button>
                 </div>
               )}

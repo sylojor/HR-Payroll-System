@@ -12,6 +12,7 @@ import { PayrollSection } from '@/components/sections/payroll-section';
 import { AccountingSection } from '@/components/sections/accounting-section';
 import { MessagesSection } from '@/components/sections/messages-section';
 import { NotificationsSection } from '@/components/sections/notifications-section';
+import { LicenseSection } from '@/components/sections/license-section';
 import { SettingsSection } from '@/components/sections/settings-section';
 
 const sections = {
@@ -24,6 +25,7 @@ const sections = {
   accounting: AccountingSection,
   messages: MessagesSection,
   notifications: NotificationsSection,
+  license: LicenseSection,
   settings: SettingsSection,
 };
 

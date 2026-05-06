@@ -11,6 +11,7 @@ import {
   BookOpen,
   MessageSquare,
   Bell,
+  Shield,
   Settings,
   ChevronRight,
   Building2,
@@ -33,6 +34,7 @@ const navItems: { id: Section; label: string; icon: React.ReactNode; group: stri
   { id: 'accounting', label: 'المحاسبة', icon: <BookOpen className="h-5 w-5" />, group: 'المالية' },
   { id: 'messages', label: 'الرسائل', icon: <MessageSquare className="h-5 w-5" />, group: 'التواصل' },
   { id: 'notifications', label: 'التنبيهات', icon: <Bell className="h-5 w-5" />, group: 'التواصل' },
+  { id: 'license', label: 'الترخيص والتفعيل', icon: <Shield className="h-5 w-5" />, group: 'النظام' },
   { id: 'settings', label: 'الإعدادات', icon: <Settings className="h-5 w-5" />, group: 'النظام' },
 ];
 

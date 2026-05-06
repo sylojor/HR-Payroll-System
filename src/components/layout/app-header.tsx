@@ -17,6 +17,7 @@ const sectionTitles: Record<Section, string> = {
   accounting: 'المحاسبة',
   messages: 'الرسائل',
   notifications: 'التنبيهات',
+  license: 'الترخيص والتفعيل',
   settings: 'الإعدادات',
 };
 
@@ -30,17 +31,26 @@ const sectionDescriptions: Record<Section, string> = {
   accounting: 'إدارة الحسابات والقيود المحاسبية',
   messages: 'المراسلات الداخلية بين الموظفين',
   notifications: 'التنبيهات والإشعارات',
+  license: 'إدارة الترخيص وتفعيل النظام',
   settings: 'إعدادات النظام والشركة',
 };
 
 export function AppHeader() {
   const { activeSection, toggleSidebar, sidebarOpen } = useAppStore();
   const [darkMode, setDarkMode] = useState(false);
-  const [currentTime, setCurrentTime] = useState(new Date());
+  const [currentTime, setCurrentTime] = useState<Date | null>(null);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    const initTimer = requestAnimationFrame(() => {
+      setMounted(true);
+      setCurrentTime(new Date());
+    });
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
+    return () => {
+      cancelAnimationFrame(initTimer);
+      clearInterval(timer);
+    };
   }, []);
 
   useEffect(() => {
@@ -79,18 +89,20 @@ export function AppHeader() {
         {/* Right Actions */}
         <div className="flex items-center gap-2">
           {/* Time */}
-          <div className="hidden lg:flex flex-col items-end text-xs">
-            <span className="font-mono font-medium">
-              {currentTime.toLocaleTimeString('ar-JO', { hour: '2-digit', minute: '2-digit' })}
-            </span>
-            <span className="text-muted-foreground">
-              {currentTime.toLocaleDateString('ar-JO', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-            </span>
-          </div>
+          {mounted && currentTime && (
+            <div className="hidden lg:flex flex-col items-end text-xs">
+              <span className="font-mono font-medium">
+                {currentTime.toLocaleTimeString('ar-JO', { hour: '2-digit', minute: '2-digit' })}
+              </span>
+              <span className="text-muted-foreground">
+                {currentTime.toLocaleDateString('ar-JO', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+              </span>
+            </div>
+          )}
 
           {/* Dark Mode Toggle */}
           <Button variant="ghost" size="icon" onClick={() => setDarkMode(!darkMode)}>
-            {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            {mounted && darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </Button>
 
           {/* Notifications */}

@@ -9,8 +9,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Clock, Users, UserX, TrendingUp, Download, Plus, CalendarDays, Search } from 'lucide-react';
+import { Clock, Users, UserX, TrendingUp, Download, Plus, CalendarDays, Search, FileText, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { downloadAttendancePDF } from '@/lib/pdf-client';
 
 interface Employee {
   id: string;
@@ -67,7 +68,13 @@ function getTodayString(): string {
 
 export function AttendanceSection() {
   const { toast } = useToast();
-  const [date, setDate] = useState(getTodayString());
+  const [date, setDate] = useState('');
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    setDate(getTodayString());
+  }, []);
   const [departmentId, setDepartmentId] = useState<string>('all');
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -81,6 +88,7 @@ export function AttendanceSection() {
   const [formStatus, setFormStatus] = useState('present');
   const [formNote, setFormNote] = useState('');
   const [formSubmitting, setFormSubmitting] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const fetchRecords = useCallback(async () => {
     setLoading(true);
@@ -103,8 +111,8 @@ export function AttendanceSection() {
   }, [date, departmentId]);
 
   useEffect(() => {
-    fetchRecords();
-  }, [fetchRecords]);
+    if (date) fetchRecords();
+  }, [fetchRecords, date]);
 
   useEffect(() => {
     async function fetchMeta() {
@@ -248,8 +256,13 @@ export function AttendanceSection() {
           <p className="text-sm text-muted-foreground mt-1">{formatDateArabic(date)}</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <Button variant="outline" size="sm" onClick={() => { toast({ title: 'تصدير', description: 'سيتم تصدير البيانات قريباً' }); }}>
-            <Download className="h-4 w-4 ml-2" /> تصدير
+          <Button variant="outline" size="sm" disabled={exporting} onClick={async () => {
+            setExporting(true);
+            await downloadAttendancePDF(date, departmentId);
+            setExporting(false);
+          }}>
+            {exporting ? <Loader2 className="h-4 w-4 ml-2 animate-spin" /> : <FileText className="h-4 w-4 ml-2" />}
+            {exporting ? 'جاري التصدير...' : 'تصدير PDF'}
           </Button>
           <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => setShowAddDialog(true)}>
             <Plus className="h-4 w-4 ml-2" /> إضافة سجل يدوي

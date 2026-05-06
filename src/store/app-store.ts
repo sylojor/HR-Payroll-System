@@ -10,6 +10,7 @@ export type Section =
   | 'accounting'
   | 'messages'
   | 'notifications'
+  | 'license'
   | 'settings';
 
 interface AppState {

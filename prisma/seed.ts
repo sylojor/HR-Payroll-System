@@ -220,6 +220,26 @@ async function seed() {
   await db.leaveRequest.create({ data: { employeeId: employees[3].id, leaveTypeId: (await db.leaveType.findFirst({ where: { nameEn: 'Annual Leave' } }))!.id, startDate: new Date(currentYear, currentMonth, 20), endDate: new Date(currentYear, currentMonth, 22), totalDays: 3, reason: 'إجازة عائلية', status: 'pending' } });
   await db.leaveRequest.create({ data: { employeeId: employees[7].id, leaveTypeId: (await db.leaveType.findFirst({ where: { nameEn: 'Sick Leave' } }))!.id, startDate: new Date(currentYear, currentMonth, 15), endDate: new Date(currentYear, currentMonth, 16), totalDays: 2, reason: 'مراجعة طبية', status: 'approved', approvedAt: new Date() } });
 
+  // Create Demo License
+  const demoExpiry = new Date();
+  demoExpiry.setMonth(demoExpiry.getMonth() + 12);
+  await db.license.create({
+    data: {
+      licenseKey: 'HRMS-DEMO-2025-SYST-EM01',
+      companyName: 'شركة تجريبية',
+      companyEmail: 'info@demo.com',
+      phone: '+962 7X XXX XXXX',
+      maxEmployees: 100,
+      maxDevices: 10,
+      modules: 'all',
+      expiresAt: demoExpiry,
+      isActive: true,
+      activatedAt: new Date(),
+      machineId: 'demo-machine-fingerprint-001',
+      notes: 'ترخيص تجريبي - صالح لمدة سنة',
+    },
+  });
+
   console.log('✅ Database seeded successfully!');
   console.log(`- Company: ${company.name}`);
   console.log(`- Employees: ${employees.length}`);
