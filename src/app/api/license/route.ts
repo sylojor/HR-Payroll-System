@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getLicenseStatus, validateLicenseKeyFormat } from '@/lib/license';
+import { getLicenseStatus, validateLicenseKeyFormat } from '@/lib/license-server';
 
 // GET: Return current license status
 export async function GET() {

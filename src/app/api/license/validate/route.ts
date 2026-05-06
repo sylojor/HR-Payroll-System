@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { validateLicenseKeyFormat } from '@/lib/license';
+import { validateLicenseKeyFormat } from '@/lib/license-server';
 
 // POST: Validate a license key without activating
 export async function POST(request: NextRequest) {

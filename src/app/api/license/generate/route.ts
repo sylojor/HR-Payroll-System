@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { generateLicenseKey, calculateExpiry } from '@/lib/license';
+import { generateLicenseKey, calculateExpiry } from '@/lib/license-server';
 
 // POST: Generate a new license key (admin function)
 export async function POST(request: NextRequest) {

@@ -1,5 +1,5 @@
 import { db } from '@/lib/db';
-import { getLicenseStatus } from '@/lib/license';
+import { getLicenseStatus } from '@/lib/license-server';
 
 export interface LicenseStatus {
   isLicensed: boolean;
