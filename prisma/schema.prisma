@@ -1,0 +1,384 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// Company & Settings
+// ============================================
+model Company {
+  id          String @id @default(cuid())
+  name        String @default("شركتي")
+  nameEn      String @default("My Company")
+  logo        String?
+  address     String?
+  phone       String?
+  email       String?
+  currency    String @default("JOD")
+  fiscalYearStart String @default("01-01")
+  workingHours    Float  @default(8.0)
+  overtimeRate    Float  @default(1.5)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ============================================
+// Departments & Positions
+// ============================================
+model Department {
+  id          String @id @default(cuid())
+  name        String
+  nameEn      String?
+  description String?
+  managerId   String? @unique
+  manager     Employee?  @relation("DepartmentManager", fields: [managerId], references: [id])
+  employees   Employee[] @relation("DepartmentEmployees")
+  positions   Position[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Position {
+  id           String @id @default(cuid())
+  title        String
+  titleEn      String?
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id])
+  employees    Employee[]
+  minSalary    Float?
+  maxSalary    Float?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// ============================================
+// Work Schedules
+// ============================================
+model WorkSchedule {
+  id            String @id @default(cuid())
+  name          String
+  sunday        Boolean @default(true)
+  monday        Boolean @default(true)
+  tuesday       Boolean @default(true)
+  wednesday     Boolean @default(true)
+  thursday      Boolean @default(true)
+  friday        Boolean @default(false)
+  saturday      Boolean @default(false)
+  startTime     String @default("08:00")
+  endTime       String @default("17:00")
+  breakStart    String @default("12:00")
+  breakEnd      String @default("13:00")
+  lateThreshold Int @default(15)
+  earlyLeaveThreshold Int @default(15)
+  employees     Employee[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ============================================
+// Employees
+// ============================================
+model Employee {
+  id              String @id @default(cuid())
+  employeeId      String @unique
+  firstName       String
+  lastName        String
+  firstNameEn     String?
+  lastNameEn      String?
+  email           String?
+  phone           String?
+  mobile          String?
+  nationalId      String?
+  passportNumber  String?
+  birthDate       DateTime?
+  hireDate        DateTime @default(now())
+  endDate         DateTime?
+  gender          String  @default("male")
+  maritalStatus   String  @default("single")
+  address         String?
+  city            String?
+  country         String?
+  photo           String?
+  status          String  @default("active")
+  departmentId    String?
+  department      Department? @relation("DepartmentEmployees", fields: [departmentId], references: [id])
+  positionId      String?
+  position        Position? @relation(fields: [positionId], references: [id])
+  workScheduleId  String?
+  workSchedule    WorkSchedule? @relation(fields: [workScheduleId], references: [id])
+  fingerprintId   String?
+  bankName        String?
+  bankAccount     String?
+  iban            String?
+  emergencyContact String?
+  emergencyPhone  String?
+  notes           String?
+  managedDepartment Department? @relation("DepartmentManager")
+  salaryComponents EmployeeSalaryComponent[]
+  attendanceRecords AttendanceRecord[]
+  leaveRequests   LeaveRequest[]
+  payrollItems    PayrollItem[]
+  sentMessages    Message[] @relation("MessageSender")
+  receivedMessages MessageRecipient[]
+  notifications   Notification[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ============================================
+// Fingerprint Devices (ZK / Hikvision)
+// ============================================
+model FingerprintDevice {
+  id            String @id @default(cuid())
+  name          String
+  deviceType    String @default("zk")
+  model         String?
+  ipAddress     String
+  port          Int @default(4370)
+  serialNumber  String?
+  location      String?
+  status        String @default("offline")
+  lastSync      DateTime?
+  username      String?
+  password      String?
+  apiKey        String?
+  isDefault     Boolean @default(false)
+  syncInterval  Int @default(30)
+  attendanceRecords AttendanceRecord[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ============================================
+// Attendance
+// ============================================
+model AttendanceRecord {
+  id            String @id @default(cuid())
+  employeeId    String
+  employee      Employee @relation(fields: [employeeId], references: [id])
+  deviceId      String?
+  device        FingerprintDevice? @relation(fields: [deviceId], references: [id])
+  date          DateTime
+  checkIn       DateTime?
+  checkOut      DateTime?
+  breakOut      DateTime?
+  breakIn       DateTime?
+  workHours     Float?
+  overtimeHours Float?
+  lateMinutes   Int @default(0)
+  earlyLeaveMinutes Int @default(0)
+  status        String @default("present")
+  note          String?
+  isManual      Boolean @default(false)
+  verifiedBy    String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([employeeId, date])
+}
+
+// ============================================
+// Leave Management
+// ============================================
+model LeaveType {
+  id            String @id @default(cuid())
+  name          String
+  nameEn        String?
+  defaultDays   Int @default(0)
+  isPaid        Boolean @default(true)
+  requiresApproval Boolean @default(true)
+  carryForward  Boolean @default(false)
+  leaveRequests LeaveRequest[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model LeaveRequest {
+  id            String @id @default(cuid())
+  employeeId    String
+  employee      Employee @relation(fields: [employeeId], references: [id])
+  leaveTypeId   String
+  leaveType     LeaveType @relation(fields: [leaveTypeId], references: [id])
+  startDate     DateTime
+  endDate       DateTime
+  totalDays     Int
+  reason        String?
+  status        String @default("pending")
+  approvedById  String?
+  approvedAt    DateTime?
+  rejectionReason String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ============================================
+// Salary & Payroll
+// ============================================
+model SalaryComponent {
+  id            String @id @default(cuid())
+  name          String
+  nameEn        String?
+  type          String @default("earning")
+  category      String @default("basic")
+  isFixed       Boolean @default(true)
+  isTaxable     Boolean @default(true)
+  defaultValue  Float @default(0)
+  description   String?
+  employeeComponents EmployeeSalaryComponent[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model EmployeeSalaryComponent {
+  id            String @id @default(cuid())
+  employeeId    String
+  employee      Employee @relation(fields: [employeeId], references: [id])
+  componentId   String
+  component     SalaryComponent @relation(fields: [componentId], references: [id])
+  amount        Float @default(0)
+  effectiveDate DateTime @default(now())
+  endDate       DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Payroll {
+  id            String @id @default(cuid())
+  month         Int
+  year          Int
+  status        String @default("draft")
+  totalEarnings Float @default(0)
+  totalDeductions Float @default(0)
+  totalNet      Float @default(0)
+  processedAt   DateTime?
+  processedBy   String?
+  note          String?
+  items         PayrollItem[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([month, year])
+}
+
+model PayrollItem {
+  id            String @id @default(cuid())
+  payrollId     String
+  payroll       Payroll @relation(fields: [payrollId], references: [id], onDelete: Cascade)
+  employeeId    String
+  employee      Employee @relation(fields: [employeeId], references: [id])
+  basicSalary   Float @default(0)
+  totalEarnings Float @default(0)
+  totalDeductions Float @default(0)
+  netSalary     Float @default(0)
+  overtimePay   Float @default(0)
+  lateDeduction Float @default(0)
+  absenceDeduction Float @default(0)
+  loanDeduction Float @default(0)
+  taxAmount     Float @default(0)
+  socialSecurity Float @default(0)
+  details       String?
+  status        String @default("pending")
+  paidAt        DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ============================================
+// Accounting
+// ============================================
+model Account {
+  id            String @id @default(cuid())
+  code          String @unique
+  name          String
+  nameEn        String?
+  type          String @default("asset")
+  category      String?
+  parentId      String?
+  parent        Account? @relation("AccountHierarchy", fields: [parentId], references: [id])
+  children      Account[] @relation("AccountHierarchy")
+  balance       Float @default(0)
+  isActive      Boolean @default(true)
+  debitTransactions  Transaction[] @relation("TransactionDebit")
+  creditTransactions Transaction[] @relation("TransactionCredit")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Transaction {
+  id            String @id @default(cuid())
+  date          DateTime @default(now())
+  description   String?
+  reference     String?
+  debitAccountId  String
+  debitAccount    Account @relation("TransactionDebit", fields: [debitAccountId], references: [id])
+  creditAccountId String
+  creditAccount   Account @relation("TransactionCredit", fields: [creditAccountId], references: [id])
+  amount        Float
+  type          String @default("general")
+  status        String @default("posted")
+  createdBy     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ============================================
+// Messages & Notifications
+// ============================================
+model Message {
+  id            String @id @default(cuid())
+  senderId      String
+  sender        Employee @relation("MessageSender", fields: [senderId], references: [id])
+  subject       String
+  content       String
+  priority      String @default("normal")
+  isBroadcast   Boolean @default(false)
+  recipients    MessageRecipient[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model MessageRecipient {
+  id            String @id @default(cuid())
+  messageId     String
+  message       Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  employeeId    String
+  employee      Employee @relation(fields: [employeeId], references: [id])
+  isRead        Boolean @default(false)
+  readAt        DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([messageId, employeeId])
+}
+
+model Notification {
+  id            String @id @default(cuid())
+  employeeId    String?
+  employee      Employee? @relation(fields: [employeeId], references: [id])
+  title         String
+  message       String
+  type          String @default("info")
+  category      String @default("system")
+  isRead        Boolean @default(false)
+  readAt        DateTime?
+  actionUrl     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ============================================
+// Reports Cache
+// ============================================
+model Report {
+  id            String @id @default(cuid())
+  name          String
+  type          String
+  parameters    String?
+  data          String?
+  generatedBy   String?
+  createdAt     DateTime @default(now())
+}
