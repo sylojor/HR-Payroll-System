@@ -90,3 +90,22 @@ Stage Summary:
 - Client-side error likely caused by Google Fonts not loading in Electron
 - Created single-file setup.exe (135MB) using 7-Zip SFX technology
 - Release: https://github.com/sylojor/HR-Payroll-System/releases/tag/v1.0.6
+
+---
+Task ID: 1
+Agent: Subagent
+Task: Fix PrismaClient is not a constructor error on Windows
+
+Work Log:
+- Identified root cause: Turbopack's .next/node_modules/@prisma/client-2c3a283f134fdcb6 was a SYMLINK
+- Symlinks don't survive ZIP extraction on Windows, causing require() to fail
+- Replaced symlink with actual directory copy of @prisma/client
+- Added .prisma/client directory to .next/node_modules/ (required for module resolution)
+- Verified no symlinks remain in the standalone output
+- Confirmed query_engine-windows.dll.node exists in all necessary locations
+- Rebuilt and uploaded as v1.0.7
+
+Stage Summary:
+- Core fix: Replaced symlink with directory copy in .next/node_modules/@prisma/
+- Added .prisma/client to .next/node_modules/ for proper require('.prisma/client/default') resolution
+- Release: https://github.com/sylojor/HR-Payroll-System/releases/tag/v1.0.7
