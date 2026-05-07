@@ -48,3 +48,27 @@ Stage Summary:
 - Reduced ZIP size from previous ~200MB to 185MB
 - Release uploaded: v1.0.4
 - Key lesson: electron-builder's extraResources does NOT reliably copy node_modules from source directories
+---
+Task ID: 1
+Agent: Main Agent
+Task: Fix Windows EXE server startup + Create installer
+
+Work Log:
+- Identified root cause: Missing Windows native modules (@next/swc-win32-x64-msvc, @img/sharp-win32-x64)
+- The standalone build only includes Linux native modules since we build on Linux
+- Force-installed Windows native modules: @next/swc-win32-x64-msvc (125MB), @img/sharp-win32-x64, @img/sharp-libvips-win32-x64
+- Added all Windows modules to standalone/node_modules before packaging
+- Improved main.js: detailed file verification, log reading on timeout, open log folder button
+- Added IPC handler for opening log folder from error page
+- Created install.bat installer that: copies to Program Files, creates desktop/Start Menu shortcuts, registers in Add/Remove Programs, creates uninstaller
+- Package structure: HR-Payroll-System-Setup/install.bat + App/ (all app files)
+- Reduced size by removing Linux-only modules, locales, unnecessary Prisma files
+- Final ZIP: 230MB compressed
+- Uploaded to GitHub as v1.0.5
+
+Stage Summary:
+- Fixed: Added @next/swc-win32-x64-msvc (was the likely cause of server startup failure)
+- Fixed: Added @img/sharp-win32-x64 for Windows image processing
+- Added: install.bat installer with shortcuts, registry, uninstaller
+- Improved: Error page now shows last 20 lines of log + open log folder button
+- Release: https://github.com/sylojor/HR-Payroll-System/releases/download/v1.0.5/HR-Payroll-System-1.0.5-Setup.zip
