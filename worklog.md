@@ -72,3 +72,21 @@ Stage Summary:
 - Added: install.bat installer with shortcuts, registry, uninstaller
 - Improved: Error page now shows last 20 lines of log + open log folder button
 - Release: https://github.com/sylojor/HR-Payroll-System/releases/download/v1.0.5/HR-Payroll-System-1.0.5-Setup.zip
+---
+Task ID: 1
+Agent: Subagent
+Task: Fix client-side exception + Create setup.exe installer
+
+Work Log:
+- Replaced Google Fonts (Geist) with local Tajawal Arabic fonts
+- Added ErrorBoundary component to catch client-side errors
+- Added error state to DashboardSection for graceful error handling
+- Removed .env from standalone (was overriding DATABASE_URL on Windows)
+- Created self-extracting setup.exe using 7-Zip SFX (7z.sfx + config + 7z archive)
+- Updated install.bat with proper shortcuts, registry entries, and uninstaller
+- Rebuilt and uploaded as v1.0.6
+
+Stage Summary:
+- Client-side error likely caused by Google Fonts not loading in Electron
+- Created single-file setup.exe (135MB) using 7-Zip SFX technology
+- Release: https://github.com/sylojor/HR-Payroll-System/releases/tag/v1.0.6
