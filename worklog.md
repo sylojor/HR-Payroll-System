@@ -25,3 +25,26 @@ Stage Summary:
 - Employee salaries properly populated with Jordanian Dinar amounts
 - Dashboard correctly aggregates total salaries (11,110 JOD)
 - Key fixes: status filter bug, duplicate attendance check, dashboard salary calculation, unused imports
+---
+Task ID: 1
+Agent: Main Agent
+Task: Fix Windows EXE - Cannot find module 'next' error
+
+Work Log:
+- Diagnosed root cause: electron-builder's extraResources was NOT copying the standalone's node_modules properly
+- The dist only had 3 items in node_modules (@prisma, .prisma, node-zklib) from explicit extraResources entries, while standalone had 17+ items (next, react, react-dom, etc.)
+- Simplified package.json extraResources to only include db and prisma directories
+- Added explicit exclude patterns in files config to prevent bloated app.asar (was 540MB, now 16KB)
+- Created build script (scripts/build-exe.sh) that manually copies standalone directory after electron-builder runs
+- Updated main.js to always use ELECTRON_RUN_AS_NODE (removed node.exe search logic)
+- Added checks in main.js to verify node_modules/next exists before spawning server
+- Reduced package size: trimmed locales (48MB→1.7MB), removed non-Windows Prisma engines, removed Linux sharp modules, removed typescript, LICENSES files
+- Final package: 398MB uncompressed → 185MB ZIP
+- Uploaded v1.0.4 to GitHub: https://github.com/sylojor/HR-Payroll-System/releases/download/v1.0.4/HR-Payroll-System-1.0.4-Windows.zip
+
+Stage Summary:
+- Fixed: electron-builder not copying standalone's node_modules (manual copy after build)
+- Fixed: app.asar was 540MB (reduced to 16KB with proper file exclusions)
+- Reduced ZIP size from previous ~200MB to 185MB
+- Release uploaded: v1.0.4
+- Key lesson: electron-builder's extraResources does NOT reliably copy node_modules from source directories
