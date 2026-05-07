@@ -1,12 +1,11 @@
-const { app, BrowserWindow, Menu, shell, dialog } = require('electron');
+const { app, BrowserWindow, Menu, shell } = require('electron');
 const path = require('path');
-const { spawn, execFileSync } = require('child_process');
+const { spawn } = require('child_process');
 const fs = require('fs');
 const http = require('http');
 
 let mainWindow;
 let nextProcess;
-let serverReady = false;
 
 const isDev = !app.isPackaged;
 
@@ -36,9 +35,11 @@ function log(msg) {
 
 log('=== Application Starting ===');
 log(`isDev: ${isDev}`);
-log(`app.getPath('userData'): ${app.getPath('userData')}`);
-log(`process.resourcesPath: ${process.resourcesPath}`);
-log(`process.execPath: ${process.execPath}`);
+log(`userData: ${app.getPath('userData')}`);
+log(`resourcesPath: ${process.resourcesPath}`);
+log(`execPath: ${process.execPath}`);
+log(`platform: ${process.platform}`);
+log(`arch: ${process.arch}`);
 
 // ===== Database path =====
 function getDatabasePath() {
@@ -51,16 +52,32 @@ function getDatabasePath() {
 // Convert Windows path to proper file:// URL for Prisma/SQLite
 function getDatabaseUrl() {
   const dbPath = getDatabasePath();
-  // Convert backslashes to forward slashes for URL
+  // Normalize to forward slashes for URL
   const normalized = dbPath.replace(/\\/g, '/');
-  // Ensure proper file URL format
-  if (normalized.startsWith('/') || normalized.match(/^[A-Za-z]:/)) {
-    return `file://${normalized}`;
+  if (normalized.match(/^[A-Za-z]:/)) {
+    return `file:///${normalized}`;
   }
   return `file:${normalized}`;
 }
 
-// ===== Loading HTML shown while server starts =====
+// ===== Find Node.js executable =====
+function getNodePath() {
+  if (isDev) {
+    return 'node'; // Use system node in dev
+  }
+  // In production, use bundled node.exe next to the app exe
+  const appDir = path.dirname(process.execPath);
+  const bundledNode = path.join(appDir, 'node.exe');
+  if (fs.existsSync(bundledNode)) {
+    log(`Using bundled node: ${bundledNode}`);
+    return bundledNode;
+  }
+  // Fallback: try ELECTRON_RUN_AS_NODE
+  log(`WARNING: node.exe not found at ${bundledNode}, falling back to ELECTRON_RUN_AS_NODE`);
+  return null;
+}
+
+// ===== Loading HTML =====
 function getLoadingHTML() {
   return `<!DOCTYPE html>
 <html dir="rtl">
@@ -105,8 +122,8 @@ function getLoadingHTML() {
 </html>`;
 }
 
-// ===== Error HTML shown if server fails =====
-function getErrorHTML(error) {
+// ===== Error HTML =====
+function getErrorHTML(error, logPath) {
   return `<!DOCTYPE html>
 <html dir="rtl">
 <head>
@@ -118,7 +135,7 @@ function getErrorHTML(error) {
       background: #fef2f2; display: flex; justify-content: center; align-items: center;
       height: 100vh; color: #991b1b;
     }
-    .container { text-align: center; max-width: 500px; padding: 40px; }
+    .container { text-align: center; max-width: 600px; padding: 40px; }
     .icon { font-size: 64px; margin-bottom: 20px; }
     h1 { font-size: 24px; margin-bottom: 12px; }
     p { font-size: 16px; margin-bottom: 8px; color: #b91c1c; }
@@ -126,9 +143,11 @@ function getErrorHTML(error) {
       background: #fee2e2; border-radius: 8px; padding: 16px; 
       margin-top: 16px; text-align: right; font-size: 13px;
       font-family: monospace; direction: ltr; white-space: pre-wrap;
+      max-height: 200px; overflow-y: auto;
     }
+    .loginfo { margin-top: 16px; font-size: 13px; color: #7f1d1d; }
     button {
-      margin-top: 24px; padding: 12px 32px; background: #059669; color: white;
+      margin-top: 20px; padding: 12px 32px; background: #059669; color: white;
       border: none; border-radius: 8px; font-size: 16px; cursor: pointer;
     }
     button:hover { background: #047857; }
@@ -140,7 +159,8 @@ function getErrorHTML(error) {
     <h1>فشل تشغيل النظام</h1>
     <p>حدث خطأ أثناء تشغيل سيرفر النظام</p>
     <div class="details">${error || 'خطأ غير معروف'}</div>
-    <button onclick="location.reload()">إعادة المحاولة</button>
+    <div class="loginfo">📄 سجل الأخطاء: ${logPath || 'غير متوفر'}</div>
+    <button onclick="location.reload()">🔄 إعادة المحاولة</button>
   </div>
 </body>
 </html>`;
@@ -163,12 +183,10 @@ function createWindow(url) {
     backgroundColor: '#059669',
   });
 
-  // Remove default menu in production
   if (!isDev) {
     Menu.setApplicationMenu(null);
   }
 
-  // Load the URL or loading page
   if (url) {
     mainWindow.loadURL(url);
   } else if (isDev) {
@@ -184,7 +202,6 @@ function createWindow(url) {
     mainWindow.maximize();
   });
 
-  // Open external links in default browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
@@ -196,67 +213,100 @@ function createWindow(url) {
 }
 
 function startNextServer() {
-  if (!isDev) {
-    const standalonePath = path.join(process.resourcesPath, 'standalone');
-    const serverPath = path.join(standalonePath, 'server.js');
-    const dbUrl = getDatabaseUrl();
-    
-    log(`standalonePath: ${standalonePath}`);
-    log(`serverPath: ${serverPath}`);
-    log(`DATABASE_URL: ${dbUrl}`);
-    log(`server.js exists: ${fs.existsSync(serverPath)}`);
-    
-    if (!fs.existsSync(serverPath)) {
-      log('ERROR: server.js not found!');
-      return false;
-    }
-    
-    // ===== Use ELECTRON_RUN_AS_NODE=1 =====
-    const env = {
-      ...process.env,
-      ELECTRON_RUN_AS_NODE: '1',
-      PORT: '3000',
-      HOSTNAME: 'localhost',
-      NODE_ENV: 'production',
-      DATABASE_URL: dbUrl,
-    };
-
-    try {
-      nextProcess = spawn(process.execPath, [serverPath], {
-        cwd: standalonePath,
-        env,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-
-      nextProcess.stdout.on('data', (data) => {
-        const msg = data.toString().trim();
-        log(`[Server] ${msg}`);
-        if (msg.includes('Ready') || msg.includes('started') || msg.includes('listening')) {
-          serverReady = true;
-        }
-      });
-
-      nextProcess.stderr.on('data', (data) => {
-        log(`[Server Err] ${data.toString().trim()}`);
-      });
-
-      nextProcess.on('error', (err) => {
-        log(`Server spawn error: ${err.message}`);
-      });
-
-      nextProcess.on('exit', (code, signal) => {
-        log(`Server exited with code=${code} signal=${signal}`);
-        nextProcess = null;
-      });
-
-      log('Server process spawned successfully');
-      return true;
-    } catch (err) {
-      log(`Failed to spawn server: ${err.message}`);
-      return false;
-    }
+  if (isDev) {
+    return true;
   }
-  return true;
+
+  const standalonePath = path.join(process.resourcesPath, 'standalone');
+  const serverPath = path.join(standalonePath, 'server.js');
+  const dbUrl = getDatabaseUrl();
+  
+  log(`standalonePath: ${standalonePath}`);
+  log(`serverPath: ${serverPath}`);
+  log(`DATABASE_URL: ${dbUrl}`);
+  log(`server.js exists: ${fs.existsSync(serverPath)}`);
+  
+  // List some files in standalone to verify
+  try {
+    const files = fs.readdirSync(standalonePath);
+    log(`standalone contents: ${files.join(', ')}`);
+  } catch (e) {
+    log(`ERROR reading standalone dir: ${e.message}`);
+  }
+  
+  if (!fs.existsSync(serverPath)) {
+    log('FATAL: server.js not found!');
+    return false;
+  }
+  
+  // Find Node.js executable
+  const nodePath = getNodePath();
+  
+  const env = {
+    ...process.env,
+    PORT: '3000',
+    HOSTNAME: 'localhost',
+    NODE_ENV: 'production',
+    DATABASE_URL: dbUrl,
+  };
+
+  let spawnPath, spawnArgs, spawnOptions;
+
+  if (nodePath) {
+    // Use bundled node.exe
+    env.ELECTRON_RUN_AS_NODE = ''; // Unset this
+    spawnPath = nodePath;
+    spawnArgs = [serverPath];
+    spawnOptions = { cwd: standalonePath, env, stdio: ['pipe', 'pipe', 'pipe'] };
+    log(`Spawning server with bundled node: ${nodePath} ${serverPath}`);
+  } else {
+    // Fallback: use Electron with ELECTRON_RUN_AS_NODE
+    env.ELECTRON_RUN_AS_NODE = '1';
+    spawnPath = process.execPath;
+    spawnArgs = [serverPath];
+    spawnOptions = { cwd: standalonePath, env, stdio: ['pipe', 'pipe', 'pipe'] };
+    log(`Spawning server with ELECTRON_RUN_AS_NODE: ${process.execPath} ${serverPath}`);
+  }
+
+  try {
+    nextProcess = spawn(spawnPath, spawnArgs, spawnOptions);
+
+    let lastError = '';
+
+    nextProcess.stdout.on('data', (data) => {
+      const msg = data.toString().trim();
+      log(`[Server] ${msg}`);
+    });
+
+    nextProcess.stderr.on('data', (data) => {
+      const msg = data.toString().trim();
+      log(`[Server Err] ${msg}`);
+      lastError = msg;
+    });
+
+    nextProcess.on('error', (err) => {
+      log(`Server spawn error: ${err.message}`);
+    });
+
+    nextProcess.on('exit', (code, signal) => {
+      log(`Server exited with code=${code} signal=${signal}`);
+      if (code !== 0 && code !== null) {
+        // Server crashed - show error after window is created
+        setTimeout(() => {
+          if (mainWindow) {
+            mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(getErrorHTML(`السيرفر توقف برمز: ${code}\n${lastError}`, logPath))}`);
+          }
+        }, 1000);
+      }
+      nextProcess = null;
+    });
+
+    log('Server process spawned successfully');
+    return true;
+  } catch (err) {
+    log(`Failed to spawn server: ${err.message}`);
+    return false;
+  }
 }
 
 function ensureDatabaseExists() {
@@ -264,25 +314,23 @@ function ensureDatabaseExists() {
   const dbDir = path.dirname(dbPath);
   
   log(`Database path: ${dbPath}`);
+  log(`Database URL: ${getDatabaseUrl()}`);
   
   if (!isDev) {
-    // Ensure directory exists
     if (!fs.existsSync(dbDir)) {
       fs.mkdirSync(dbDir, { recursive: true });
       log(`Created database directory: ${dbDir}`);
     }
     
-    // If no DB exists, copy the default one
     if (!fs.existsSync(dbPath)) {
       const defaultDbPath = path.join(process.resourcesPath, 'db', 'custom.db');
-      log(`Default DB path: ${defaultDbPath}`);
-      log(`Default DB exists: ${fs.existsSync(defaultDbPath)}`);
+      log(`Default DB: ${defaultDbPath} exists=${fs.existsSync(defaultDbPath)}`);
       
       if (fs.existsSync(defaultDbPath)) {
         fs.copyFileSync(defaultDbPath, dbPath);
         log(`Database copied to: ${dbPath}`);
       } else {
-        log(`WARNING: Default database not found`);
+        log(`WARNING: Default database not found at ${defaultDbPath}`);
       }
     } else {
       log(`Database already exists at: ${dbPath}`);
@@ -290,16 +338,14 @@ function ensureDatabaseExists() {
   }
 }
 
-// ===== Wait for server then load the app =====
 function waitForServerAndLoad() {
-  const maxRetries = 40; // 40 * 1s = 40 seconds max
+  const maxRetries = 50; // 50 * 1s = 50 seconds
   let retries = 0;
   
   function tryConnect() {
     const req = http.get('http://localhost:3000', (res) => {
-      log(`Server responded with status: ${res.statusCode}`);
-      if (res.statusCode === 200 || res.statusCode === 302 || res.statusCode === 304) {
-        serverReady = true;
+      log(`Server responded: ${res.statusCode}`);
+      if (res.statusCode >= 200 && res.statusCode < 400) {
         if (mainWindow) {
           mainWindow.loadURL('http://localhost:3000');
         } else {
@@ -311,11 +357,13 @@ function waitForServerAndLoad() {
     });
     
     req.on('error', (err) => {
-      log(`Connection error: ${err.message}`);
+      if (retries % 5 === 0) {
+        log(`Waiting for server... (${retries}/${maxRetries}) err: ${err.message}`);
+      }
       retry();
     });
     
-    req.setTimeout(3000, () => {
+    req.setTimeout(2000, () => {
       req.destroy();
       retry();
     });
@@ -324,12 +372,11 @@ function waitForServerAndLoad() {
   function retry() {
     retries++;
     if (retries < maxRetries) {
-      log(`Waiting for server... (${retries}/${maxRetries})`);
       setTimeout(tryConnect, 1000);
     } else {
       log('ERROR: Server failed to start within timeout');
       if (mainWindow) {
-        mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(getErrorHTML('انتهت مهلة تشغيل السيرفر. تأكد من أن المنفذ 3000 غير مستخدم من تطبيق آخر.'))}`);
+        mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(getErrorHTML('انتهت مهلة تشغيل السيرفر (50 ثانية).\n\nالحلول الممكنة:\n1. تأكد أن المنفذ 3000 غير مستخدم\n2. أغلق أي تطبيق يستخدم المنفذ 3000\n3. شغّل التطبيق كمسؤول', logPath))}`);
       }
     }
   }
@@ -344,16 +391,12 @@ app.whenReady().then(() => {
   if (isDev) {
     createWindow();
   } else {
-    // Create window with loading page first
     createWindow();
-    
-    // Start the Next.js server
     const serverStarted = startNextServer();
     if (serverStarted) {
-      // Wait for server then navigate to it
       waitForServerAndLoad();
     } else {
-      mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(getErrorHTML('فشل بدء تشغيل سيرفر Next.js'))}`);
+      mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(getErrorHTML('فشل بدء تشغيل سيرفر Next.js\n\nقد يكون node.exe غير موجود بجانب التطبيق', logPath))}`);
     }
   }
 
@@ -375,7 +418,6 @@ app.on('before-quit', () => {
   if (nextProcess) {
     try {
       nextProcess.kill();
-      // On Windows, use taskkill for force
       if (process.platform === 'win32') {
         spawn('taskkill', ['/pid', String(nextProcess.pid), '/f', '/t'], { stdio: 'ignore' });
       }
