@@ -60,23 +60,6 @@ function getDatabaseUrl() {
   return `file:${normalized}`;
 }
 
-// ===== Find Node.js executable =====
-function getNodePath() {
-  if (isDev) {
-    return 'node'; // Use system node in dev
-  }
-  // In production, use bundled node.exe next to the app exe
-  const appDir = path.dirname(process.execPath);
-  const bundledNode = path.join(appDir, 'node.exe');
-  if (fs.existsSync(bundledNode)) {
-    log(`Using bundled node: ${bundledNode}`);
-    return bundledNode;
-  }
-  // Fallback: try ELECTRON_RUN_AS_NODE
-  log(`WARNING: node.exe not found at ${bundledNode}, falling back to ELECTRON_RUN_AS_NODE`);
-  return null;
-}
-
 // ===== Loading HTML =====
 function getLoadingHTML() {
   return `<!DOCTYPE html>
@@ -123,7 +106,7 @@ function getLoadingHTML() {
 }
 
 // ===== Error HTML =====
-function getErrorHTML(error, logPath) {
+function getErrorHTML(error, logPathStr) {
   return `<!DOCTYPE html>
 <html dir="rtl">
 <head>
@@ -159,7 +142,7 @@ function getErrorHTML(error, logPath) {
     <h1>فشل تشغيل النظام</h1>
     <p>حدث خطأ أثناء تشغيل سيرفر النظام</p>
     <div class="details">${error || 'خطأ غير معروف'}</div>
-    <div class="loginfo">📄 سجل الأخطاء: ${logPath || 'غير متوفر'}</div>
+    <div class="loginfo">📄 سجل الأخطاء: ${logPathStr || 'غير متوفر'}</div>
     <button onclick="location.reload()">🔄 إعادة المحاولة</button>
   </div>
 </body>
@@ -225,13 +208,27 @@ function startNextServer() {
   log(`serverPath: ${serverPath}`);
   log(`DATABASE_URL: ${dbUrl}`);
   log(`server.js exists: ${fs.existsSync(serverPath)}`);
+  log(`node_modules/next exists: ${fs.existsSync(path.join(standalonePath, 'node_modules', 'next'))}`);
   
-  // List some files in standalone to verify
+  // List files in standalone to verify
   try {
     const files = fs.readdirSync(standalonePath);
     log(`standalone contents: ${files.join(', ')}`);
   } catch (e) {
     log(`ERROR reading standalone dir: ${e.message}`);
+  }
+
+  // List node_modules contents
+  try {
+    const nmPath = path.join(standalonePath, 'node_modules');
+    if (fs.existsSync(nmPath)) {
+      const nmFiles = fs.readdirSync(nmPath);
+      log(`node_modules contents (${nmFiles.length}): ${nmFiles.join(', ')}`);
+    } else {
+      log('WARNING: node_modules directory does NOT exist in standalone!');
+    }
+  } catch (e) {
+    log(`ERROR reading node_modules: ${e.message}`);
   }
   
   if (!fs.existsSync(serverPath)) {
@@ -239,62 +236,61 @@ function startNextServer() {
     return false;
   }
   
-  // Find Node.js executable
-  const nodePath = getNodePath();
-  
+  // Check if node_modules/next exists
+  if (!fs.existsSync(path.join(standalonePath, 'node_modules', 'next'))) {
+    log('FATAL: node_modules/next not found in standalone!');
+    return false;
+  }
+
+  // Use Electron with ELECTRON_RUN_AS_NODE to spawn the server
+  // This is the most reliable approach - no need for a separate node.exe
   const env = {
     ...process.env,
     PORT: '3000',
     HOSTNAME: 'localhost',
     NODE_ENV: 'production',
     DATABASE_URL: dbUrl,
+    ELECTRON_RUN_AS_NODE: '1',
   };
 
-  let spawnPath, spawnArgs, spawnOptions;
-
-  if (nodePath) {
-    // Use bundled node.exe
-    env.ELECTRON_RUN_AS_NODE = ''; // Unset this
-    spawnPath = nodePath;
-    spawnArgs = [serverPath];
-    spawnOptions = { cwd: standalonePath, env, stdio: ['pipe', 'pipe', 'pipe'] };
-    log(`Spawning server with bundled node: ${nodePath} ${serverPath}`);
-  } else {
-    // Fallback: use Electron with ELECTRON_RUN_AS_NODE
-    env.ELECTRON_RUN_AS_NODE = '1';
-    spawnPath = process.execPath;
-    spawnArgs = [serverPath];
-    spawnOptions = { cwd: standalonePath, env, stdio: ['pipe', 'pipe', 'pipe'] };
-    log(`Spawning server with ELECTRON_RUN_AS_NODE: ${process.execPath} ${serverPath}`);
-  }
+  log(`Spawning server with ELECTRON_RUN_AS_NODE: ${process.execPath} ${serverPath}`);
+  log(`cwd: ${standalonePath}`);
 
   try {
-    nextProcess = spawn(spawnPath, spawnArgs, spawnOptions);
+    nextProcess = spawn(process.execPath, [serverPath], {
+      cwd: standalonePath,
+      env: env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
 
-    let lastError = '';
+    let serverOutput = '';
+    let serverError = '';
 
     nextProcess.stdout.on('data', (data) => {
       const msg = data.toString().trim();
       log(`[Server] ${msg}`);
+      serverOutput += msg + '\n';
     });
 
     nextProcess.stderr.on('data', (data) => {
       const msg = data.toString().trim();
       log(`[Server Err] ${msg}`);
-      lastError = msg;
+      serverError += msg + '\n';
     });
 
     nextProcess.on('error', (err) => {
       log(`Server spawn error: ${err.message}`);
+      serverError = err.message;
     });
 
     nextProcess.on('exit', (code, signal) => {
       log(`Server exited with code=${code} signal=${signal}`);
       if (code !== 0 && code !== null) {
+        const errorMsg = serverError || serverOutput || `Exit code: ${code}`;
         // Server crashed - show error after window is created
         setTimeout(() => {
           if (mainWindow) {
-            mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(getErrorHTML(`السيرفر توقف برمز: ${code}\n${lastError}`, logPath))}`);
+            mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(getErrorHTML(errorMsg, logPath))}`);
           }
         }, 1000);
       }
@@ -326,11 +322,16 @@ function ensureDatabaseExists() {
       const defaultDbPath = path.join(process.resourcesPath, 'db', 'custom.db');
       log(`Default DB: ${defaultDbPath} exists=${fs.existsSync(defaultDbPath)}`);
       
-      if (fs.existsSync(defaultDbPath)) {
-        fs.copyFileSync(defaultDbPath, dbPath);
-        log(`Database copied to: ${dbPath}`);
+      // Also try in standalone/db
+      const standaloneDbPath = path.join(process.resourcesPath, 'standalone', 'db', 'custom.db');
+      const dbSource = fs.existsSync(defaultDbPath) ? defaultDbPath : 
+                       (fs.existsSync(standaloneDbPath) ? standaloneDbPath : null);
+      
+      if (dbSource) {
+        fs.copyFileSync(dbSource, dbPath);
+        log(`Database copied from ${dbSource} to: ${dbPath}`);
       } else {
-        log(`WARNING: Default database not found at ${defaultDbPath}`);
+        log(`WARNING: Default database not found`);
       }
     } else {
       log(`Database already exists at: ${dbPath}`);
@@ -339,7 +340,7 @@ function ensureDatabaseExists() {
 }
 
 function waitForServerAndLoad() {
-  const maxRetries = 50; // 50 * 1s = 50 seconds
+  const maxRetries = 60; // 60 * 1s = 60 seconds
   let retries = 0;
   
   function tryConnect() {
@@ -376,7 +377,7 @@ function waitForServerAndLoad() {
     } else {
       log('ERROR: Server failed to start within timeout');
       if (mainWindow) {
-        mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(getErrorHTML('انتهت مهلة تشغيل السيرفر (50 ثانية).\n\nالحلول الممكنة:\n1. تأكد أن المنفذ 3000 غير مستخدم\n2. أغلق أي تطبيق يستخدم المنفذ 3000\n3. شغّل التطبيق كمسؤول', logPath))}`);
+        mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(getErrorHTML('انتهت مهلة تشغيل السيرفر (60 ثانية).\n\nالحلول الممكنة:\n1. تأكد أن المنفذ 3000 غير مستخدم\n2. أغلق أي تطبيق يستخدم المنفذ 3000\n3. شغّل التطبيق كمسؤول\n4. تحقق من سجل الأخطاء', logPath))}`);
       }
     }
   }
@@ -396,7 +397,7 @@ app.whenReady().then(() => {
     if (serverStarted) {
       waitForServerAndLoad();
     } else {
-      mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(getErrorHTML('فشل بدء تشغيل سيرفر Next.js\n\nقد يكون node.exe غير موجود بجانب التطبيق', logPath))}`);
+      mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(getErrorHTML('فشل بدء تشغيل سيرفر النظام\n\nملفات التطبيق غير مكتملة\nيرجى إعادة تحميل التطبيق', logPath))}`);
     }
   }
 

@@ -1,6 +1,6 @@
 {
   "name": "hr-payroll-system",
-  "version": "1.0.0",
+  "version": "1.0.4",
   "private": true,
   "main": "electron/main.js",
   "scripts": {
@@ -109,25 +109,18 @@
       "output": "dist-electron"
     },
     "npmRebuild": false,
+    "asar": true,
     "files": [
-      "electron/**/*"
+      "electron/**/*",
+      "!node_modules",
+      "!.next",
+      "!db",
+      "!prisma",
+      "!src",
+      "!public",
+      "!scripts"
     ],
     "extraResources": [
-      {
-        "from": ".next/standalone",
-        "to": "standalone",
-        "filter": ["**/*"]
-      },
-      {
-        "from": ".next/static",
-        "to": "standalone/.next/static",
-        "filter": ["**/*"]
-      },
-      {
-        "from": "public",
-        "to": "standalone/public",
-        "filter": ["**/*"]
-      },
       {
         "from": "db",
         "to": "db",
@@ -137,21 +130,6 @@
         "from": "prisma",
         "to": "prisma",
         "filter": ["**/*", "!**/migrations/**"]
-      },
-      {
-        "from": "node_modules/.prisma",
-        "to": "standalone/node_modules/.prisma",
-        "filter": ["**/*"]
-      },
-      {
-        "from": "node_modules/@prisma",
-        "to": "standalone/node_modules/@prisma",
-        "filter": ["**/*", "!**/test/**", "!**/tests/**"]
-      },
-      {
-        "from": "node_modules/node-zklib",
-        "to": "standalone/node_modules/node-zklib",
-        "filter": ["**/*"]
       }
     ],
     "win": {
