@@ -1,5 +1,5 @@
 import { db } from '@/lib/db';
-import { syncZKAttendance, syncHikvisionAttendance } from '@/lib/zk-service';
+import { testZKConnection, testHikvisionConnection } from '@/lib/zk-service';
 import { NextResponse } from 'next/server';
 
 export async function POST(
@@ -28,24 +28,33 @@ export async function POST(
     let result;
 
     if (device.deviceType === 'zk') {
-      result = await syncZKAttendance(config);
+      result = await testZKConnection(config);
     } else if (device.deviceType === 'hikvision') {
-      result = await syncHikvisionAttendance(config);
+      result = await testHikvisionConnection(config);
     } else {
       return NextResponse.json({ error: 'نوع الجهاز غير مدعوم' }, { status: 400 });
     }
 
+    // Update device status based on test result
+    await db.fingerprintDevice.update({
+      where: { id },
+      data: {
+        status: result.success ? 'online' : 'offline',
+        serialNumber: result.info?.serialNumber || device.serialNumber,
+      }
+    });
+
     return NextResponse.json({
-      message: result.success 
-        ? `تمت المزامنة بنجاح - ${result.synced} سجل جديد، ${result.skipped} تم تجاهلهم`
-        : 'فشلت المزامنة',
       success: result.success,
-      synced: result.synced,
-      skipped: result.skipped,
-      errors: result.errors,
+      message: result.success ? 'الاتصال ناجح بالجهاز' : 'فشل الاتصال بالجهاز',
+      info: result.info,
+      error: result.error,
     });
   } catch (error: any) {
-    console.error('Error syncing device:', error);
-    return NextResponse.json({ error: error.message || 'فشل في مزامنة الجهاز' }, { status: 500 });
+    console.error('Error testing device:', error);
+    return NextResponse.json({ 
+      success: false,
+      error: error.message || 'فشل في اختبار الاتصال' 
+    }, { status: 500 });
   }
 }

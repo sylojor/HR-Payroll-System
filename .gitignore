@@ -36,7 +36,6 @@ yarn-error.log*
 # vercel
 .vercel
 
-
 # typescript
 *.tsbuildinfo
 next-env.d.ts
@@ -46,9 +45,15 @@ local-*
 *.log
 dev.log
 dev.out.log
-test
-prompt
-
 server.log
+
 # Skills directory
 /skills/
+
+# Electron build output
+/dist-electron/
+/staging-app/
+
+# Build scripts
+build-win.sh
+package-windows.js
