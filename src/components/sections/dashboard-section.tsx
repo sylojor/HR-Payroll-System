@@ -28,12 +28,19 @@ const formatCurrency = (amount: number) => amount.toLocaleString('ar-JO') + ' د
 export function DashboardSection() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/dashboard')
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
       .then(d => setData(d))
-      .catch(console.error)
+      .catch(err => {
+        console.error('Dashboard fetch error:', err);
+        setError(err.message);
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -45,7 +52,13 @@ export function DashboardSection() {
     );
   }
 
-  if (!data) return null;
+  if (!data) return (
+    <div className="flex flex-col items-center justify-center h-64 gap-4" dir="rtl">
+      <p className="text-red-500">فشل تحميل بيانات لوحة التحكم</p>
+      <p className="text-sm text-muted-foreground">{error || 'خطأ غير معروف'}</p>
+      <button onClick={() => window.location.reload()} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm">إعادة المحاولة</button>
+    </div>
+  );
 
   const statCards = [
     { label: 'إجمالي الموظفين', value: data.totalEmployees, icon: <Users className="h-5 w-5" />, color: 'emerald', trend: '+2', trendUp: true },

@@ -14,6 +14,7 @@ import { MessagesSection } from '@/components/sections/messages-section';
 import { NotificationsSection } from '@/components/sections/notifications-section';
 import { LicenseSection } from '@/components/sections/license-section';
 import { SettingsSection } from '@/components/sections/settings-section';
+import { ErrorBoundary } from '@/components/error-boundary';
 
 const sections = {
   dashboard: DashboardSection,
@@ -34,14 +35,18 @@ export default function HomePage() {
   const ActiveSection = sections[activeSection];
 
   return (
-    <div className="min-h-screen flex bg-background" dir="rtl">
-      <AppSidebar />
-      <div className="flex-1 flex flex-col min-w-0">
-        <AppHeader />
-        <main className="flex-1 overflow-auto">
-          <ActiveSection />
-        </main>
+    <ErrorBoundary>
+      <div className="min-h-screen flex bg-background" dir="rtl">
+        <AppSidebar />
+        <div className="flex-1 flex flex-col min-w-0">
+          <AppHeader />
+          <main className="flex-1 overflow-auto">
+            <ErrorBoundary>
+              <ActiveSection />
+            </ErrorBoundary>
+          </main>
+        </div>
       </div>
-    </div>
+    </ErrorBoundary>
   );
 }
