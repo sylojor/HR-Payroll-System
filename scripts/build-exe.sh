@@ -55,6 +55,34 @@ if [ ! -d "$STANDALONE_DIR/node_modules/prisma" ]; then
   cp -r "$PROJECT_DIR/node_modules/prisma" "$STANDALONE_DIR/node_modules/prisma"
 fi
 
+# CRITICAL: Copy Windows SWC native module (not included by default on Linux builds)
+echo "  - Copying @next/swc-win32-x64-msvc (Windows native module)..."
+mkdir -p "$STANDALONE_DIR/node_modules/@next/swc-win32-x64-msvc"
+if [ -d "$PROJECT_DIR/node_modules/@next/swc-win32-x64-msvc" ]; then
+  cp -r "$PROJECT_DIR/node_modules/@next/swc-win32-x64-msvc/"* "$STANDALONE_DIR/node_modules/@next/swc-win32-x64-msvc/" 2>/dev/null || true
+  echo "    ✓ Copied from project node_modules"
+elif [ -d "$PROJECT_DIR/node_modules/@next/swc-linux-x64-gnu" ]; then
+  # Download the Windows version
+  echo "    ⚠ Windows SWC not in node_modules, downloading..."
+  cd "$STANDALONE_DIR/node_modules/@next"
+  npm pack @next/swc-win32-x64-msvc 2>/dev/null || true
+  if [ -f swc-win32-x64-msvc-*.tgz ]; then
+    tar -xzf swc-win32-x64-msvc-*.tgz
+    mv package/swc-win32-x64-msvc.node swc-win32-x64-msvc/ 2>/dev/null || true
+    rm -rf package swc-win32-x64-msvc-*.tgz
+    echo "    ✓ Downloaded Windows SWC module"
+  fi
+  cd "$PROJECT_DIR"
+fi
+
+# CRITICAL: Copy @img/sharp-win32-x64 (Windows native module for image processing)
+echo "  - Copying @img/sharp-win32-x64 (Windows image processing)..."
+if [ -d "$PROJECT_DIR/node_modules/@img/sharp-win32-x64" ]; then
+  mkdir -p "$STANDALONE_DIR/node_modules/@img/sharp-win32-x64"
+  cp -r "$PROJECT_DIR/node_modules/@img/sharp-win32-x64/"* "$STANDALONE_DIR/node_modules/@img/sharp-win32-x64/" 2>/dev/null || true
+  echo "    ✓ Copied @img/sharp-win32-x64"
+fi
+
 # Verify Windows Prisma engine
 if [ -f "$STANDALONE_DIR/node_modules/.prisma/client/query_engine-windows.dll.node" ]; then
   echo "  ✓ Windows Prisma engine found"
@@ -72,16 +100,20 @@ cp "$PROJECT_DIR/db/custom.db" "$STANDALONE_DIR/db/custom.db"
 mkdir -p "$STANDALONE_DIR/prisma"
 cp "$PROJECT_DIR/prisma/schema.prisma" "$STANDALONE_DIR/prisma/schema.prisma"
 
-# Step 5: Verify critical files exist
+# Step 5: Verify critical files exist (including hidden .next directory)
 echo ""
 echo ">>> Step 5: Verifying critical files..."
 CRITICAL_FILES=(
   "$STANDALONE_DIR/server.js"
+  "$STANDALONE_DIR/.next/BUILD_ID"
+  "$STANDALONE_DIR/.next/server/app/api/dashboard/route.js"
   "$STANDALONE_DIR/node_modules/next/package.json"
   "$STANDALONE_DIR/node_modules/react/package.json"
   "$STANDALONE_DIR/node_modules/react-dom/package.json"
   "$STANDALONE_DIR/node_modules/@prisma/client/package.json"
   "$STANDALONE_DIR/node_modules/.prisma/client/index.js"
+  "$STANDALONE_DIR/node_modules/.prisma/client/query_engine-windows.dll.node"
+  "$STANDALONE_DIR/node_modules/@next/swc-win32-x64-msvc/next-swc.win32-x64-msvc.node"
   "$STANDALONE_DIR/db/custom.db"
   "$STANDALONE_DIR/prisma/schema.prisma"
 )
@@ -103,6 +135,10 @@ if [ "$ALL_OK" = false ]; then
 fi
 
 echo ""
+echo "  Standalone .next contents:"
+ls "$STANDALONE_DIR/.next/" 2>/dev/null || echo "  (empty or missing)"
+
+echo ""
 echo "  Standalone node_modules contents:"
 ls "$STANDALONE_DIR/node_modules/"
 
@@ -118,9 +154,10 @@ rm -rf "$DIST_DIR"
 npx electron-builder --win --x64 --dir
 
 # Step 7: MANUALLY copy standalone directory (electron-builder extraResources is unreliable)
+# CRITICAL: Must use rsync or cp -r with dot (.) to include hidden files like .next/
 echo ""
 echo ">>> Step 7: Manually copying standalone directory into output..."
-OUTPUT_DIR="$DIST_DIR/HR-Payroll-System"
+OUTPUT_DIR="$DIST_DIR/win-unpacked"
 if [ -d "$OUTPUT_DIR" ]; then
   echo "  ✓ Output directory exists: $OUTPUT_DIR"
   
@@ -128,16 +165,50 @@ if [ -d "$OUTPUT_DIR" ]; then
   rm -rf "$OUTPUT_DIR/resources/standalone"
   mkdir -p "$OUTPUT_DIR/resources/standalone"
   
-  # Copy everything from our prepared standalone directory
-  echo "  Copying standalone files..."
-  cp -r "$STANDALONE_DIR/"* "$OUTPUT_DIR/resources/standalone/"
+  # Copy EVERYTHING from standalone, INCLUDING hidden directories like .next/
+  # Using rsync to ensure hidden files are included
+  echo "  Copying standalone files (including hidden .next directory)..."
+  if command -v rsync &> /dev/null; then
+    rsync -a "$STANDALONE_DIR/" "$OUTPUT_DIR/resources/standalone/"
+  else
+    # Fallback: copy using dot notation which includes hidden files
+    cp -r "$STANDALONE_DIR/." "$OUTPUT_DIR/resources/standalone/"
+  fi
   
-  # Verify the copy
+  # Verify the .next directory was copied (CRITICAL!)
+  if [ -d "$OUTPUT_DIR/resources/standalone/.next" ]; then
+    echo "  ✓ .next directory found in output!"
+    if [ -f "$OUTPUT_DIR/resources/standalone/.next/BUILD_ID" ]; then
+      echo "  ✓ BUILD_ID file found in output!"
+    else
+      echo "  ✗ BUILD_ID file NOT found in output - server will fail!"
+      exit 1
+    fi
+  else
+    echo "  ✗ .next directory NOT found in output - server will fail!"
+    exit 1
+  fi
+
+  # Verify next module
   if [ -d "$OUTPUT_DIR/resources/standalone/node_modules/next" ]; then
     echo "  ✓ next module found in output!"
   else
     echo "  ✗ next module NOT found in output after manual copy!"
     exit 1
+  fi
+
+  # Verify Windows SWC module
+  if [ -f "$OUTPUT_DIR/resources/standalone/node_modules/@next/swc-win32-x64-msvc/next-swc.win32-x64-msvc.node" ]; then
+    echo "  ✓ Windows SWC native module found in output!"
+  else
+    echo "  ✗ Windows SWC native module NOT found in output!"
+  fi
+
+  # Verify Windows Prisma engine
+  if [ -f "$OUTPUT_DIR/resources/standalone/node_modules/.prisma/client/query_engine-windows.dll.node" ]; then
+    echo "  ✓ Windows Prisma engine found in output!"
+  else
+    echo "  ✗ Windows Prisma engine NOT found in output!"
   fi
   
   # Verify db and prisma in resources
@@ -152,6 +223,10 @@ if [ -d "$OUTPUT_DIR" ]; then
     cp "$PROJECT_DIR/prisma/schema.prisma" "$OUTPUT_DIR/resources/prisma/"
   fi
   
+  echo ""
+  echo "  Output .next contents:"
+  ls "$OUTPUT_DIR/resources/standalone/.next/" 2>/dev/null || echo "  (missing!)"
+
   echo ""
   echo "  Output node_modules contents:"
   ls "$OUTPUT_DIR/resources/standalone/node_modules/"
@@ -170,13 +245,13 @@ else
   exit 1
 fi
 
-# Step 8: Create ZIP
+# Step 8: Create ZIP archive
 echo ""
 echo ">>> Step 8: Creating ZIP archive..."
 cd "$DIST_DIR"
 rm -f HR-Payroll-System-*.zip
-ZIP_NAME="HR-Payroll-System-1.0.7-Windows.zip"
-zip -r "$ZIP_NAME" "HR-Payroll-System/" -x "*.log"
+ZIP_NAME="HR-Payroll-System-1.0.8-Windows.zip"
+zip -r "$ZIP_NAME" "win-unpacked/" -x "*.log"
 echo "  ✓ Created: $DIST_DIR/$ZIP_NAME"
 ls -lh "$ZIP_NAME"
 
