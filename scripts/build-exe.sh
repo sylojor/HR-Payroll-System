@@ -25,6 +25,10 @@ echo ">>> Step 2: Copying static files into standalone..."
 cp -r "$PROJECT_DIR/.next/static" "$STANDALONE_DIR/.next/static"
 cp -r "$PROJECT_DIR/public" "$STANDALONE_DIR/public"
 
+# Remove .env from standalone (it has Linux paths that break on Windows)
+rm -f "$STANDALONE_DIR/.env"
+echo "  ✓ Removed .env from standalone (will be created at runtime by Electron)"
+
 # Step 3: Copy additional modules into standalone's node_modules
 echo ""
 echo ">>> Step 3: Copying additional modules into standalone node_modules..."
@@ -43,6 +47,21 @@ cp -r "$PROJECT_DIR/node_modules/.prisma" "$STANDALONE_DIR/node_modules/.prisma"
 echo "  - Copying node-zklib..."
 if [ ! -d "$STANDALONE_DIR/node_modules/node-zklib" ]; then
   cp -r "$PROJECT_DIR/node_modules/node-zklib" "$STANDALONE_DIR/node_modules/node-zklib"
+fi
+
+# Copy Prisma CLI for runtime db push
+echo "  - Copying prisma CLI..."
+if [ ! -d "$STANDALONE_DIR/node_modules/prisma" ]; then
+  cp -r "$PROJECT_DIR/node_modules/prisma" "$STANDALONE_DIR/node_modules/prisma"
+fi
+
+# Verify Windows Prisma engine
+if [ -f "$STANDALONE_DIR/node_modules/.prisma/client/query_engine-windows.dll.node" ]; then
+  echo "  ✓ Windows Prisma engine found"
+else
+  echo "  ⚠ Windows Prisma engine NOT found - attempting download..."
+  cd "$PROJECT_DIR" && npx prisma generate
+  cp -r "$PROJECT_DIR/node_modules/.prisma" "$STANDALONE_DIR/node_modules/.prisma"
 fi
 
 # Step 4: Copy database and prisma schema into standalone
@@ -156,10 +175,18 @@ echo ""
 echo ">>> Step 8: Creating ZIP archive..."
 cd "$DIST_DIR"
 rm -f HR-Payroll-System-*.zip
-ZIP_NAME="HR-Payroll-System-1.0.4-Windows.zip"
+ZIP_NAME="HR-Payroll-System-1.0.7-Windows.zip"
 zip -r "$ZIP_NAME" "HR-Payroll-System/" -x "*.log"
 echo "  ✓ Created: $DIST_DIR/$ZIP_NAME"
 ls -lh "$ZIP_NAME"
+
+# Step 8.5: Remove .env files from output (in case electron-builder copied them)
+echo ""
+echo ">>> Step 8.5: Removing .env files from output directory..."
+find "$OUTPUT_DIR" -name ".env" -type f -delete 2>/dev/null || true
+find "$OUTPUT_DIR" -name ".env.local" -type f -delete 2>/dev/null || true
+find "$OUTPUT_DIR" -name ".env.production" -type f -delete 2>/dev/null || true
+echo "  ✓ Cleaned .env files from output"
 
 echo ""
 echo "=========================================="

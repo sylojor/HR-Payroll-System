@@ -109,3 +109,45 @@ Stage Summary:
 - Core fix: Replaced symlink with directory copy in .next/node_modules/@prisma/
 - Added .prisma/client to .next/node_modules/ for proper require('.prisma/client/default') resolution
 - Release: https://github.com/sylojor/HR-Payroll-System/releases/tag/v1.0.7
+
+---
+Task ID: 2
+Agent: Fix build script for Windows
+Task: Fix build script to remove Linux .env and include Prisma CLI
+
+Work Log:
+- Read build script at /home/z/my-project/scripts/build-exe.sh and package.json
+- Added .env removal step after Step 2 (copying static files) to prevent Linux DATABASE_URL from breaking Windows runtime
+- Added Prisma CLI copy to Step 3 (node_modules/prisma) for runtime db push capability
+- Added Windows Prisma engine verification step that auto-downloads if query_engine-windows.dll.node is missing
+- Updated ZIP filename version from 1.0.4 to 1.0.7
+- Added Step 8.5: Remove .env/.env.local/.env.production from final output directory (safety net against electron-builder copies)
+- Updated package.json version from 1.0.4 to 1.0.7
+
+Stage Summary:
+- Build script now removes .env from standalone output (fixes "Error code 14: Unable to open database file" on Windows)
+- Prisma CLI included in standalone for runtime database operations
+- Windows Prisma engine auto-verified and downloaded if missing
+- Version bumped to 1.0.7 in both ZIP filename and package.json
+- Safety cleanup of .env files from final output directory before delivery
+
+---
+Task ID: 1
+Agent: Fix database path in Electron
+Task: Fix SQLite database path error in Electron main.js
+
+Work Log:
+- Read current electron/main.js to understand existing structure
+- Added `writeEnvFile()` function that deletes the stale Linux .env from standalone and writes a fresh one with the correct Windows DATABASE_URL
+- Improved `ensureDatabaseExists()` to: return boolean indicating if DB was newly created, create empty SQLite file via `fs.writeFileSync` when no source DB found, detect empty existing files that need schema push, add verification logging of final file size
+- Added `runPrismaDbPush()` function that uses `process.execPath` with `ELECTRON_RUN_AS_NODE=1` to run `prisma db push --skip-generate --accept-data-loss`, with 30-second timeout, proper stderr/stdout capture, and promise-based interface
+- Updated startup sequence in `app.whenReady()` to: (1) ensureDatabaseExists, (2) writeEnvFile, (3) runPrismaDbPush if newly created, (4) startNextServer, (5) waitForServerAndLoad
+- Improved `waitForServerAndLoad()`: increased retry interval to 2s, reduced max retries to 45 (90s total), added `tryApiHealthCheck()` for /api/dashboard as secondary check, accept server responses even with non-200 status via health check fallback, consume response data with `res.resume()` to free connections
+- Added `writeEnvFile()` call inside `startNextServer()` as double protection
+- Enhanced logging throughout all functions with function-name prefixes and detailed state info
+
+Stage Summary:
+- Core fix: .env file with Linux DATABASE_URL is now deleted and rewritten with correct Windows path at runtime
+- Fallback: If no pre-built database exists, an empty SQLite file is created and Prisma schema is pushed automatically
+- Improved resilience: Server health check now has secondary API endpoint check and accepts partial failures
+- All changes preserve existing functionality (IPC handlers, error pages, loading screen, etc.)
