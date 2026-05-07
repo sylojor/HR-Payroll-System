@@ -19,6 +19,11 @@ import {
   Trash2,
   Monitor,
   Camera,
+  Users,
+  Link2,
+  Check,
+  AlertCircle,
+  Search,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
@@ -64,6 +69,18 @@ export function DevicesSection() {
   const [editingDevice, setEditingDevice] = useState<Device | null>(null);
   const [syncingDevices, setSyncingDevices] = useState<Set<string>>(new Set());
   const [testingDevices, setTestingDevices] = useState<Set<string>>(new Set());
+
+  // Device Users Dialog state
+  const [showUsersDialog, setShowUsersDialog] = useState(false);
+  const [usersDevice, setUsersDevice] = useState<Device | null>(null);
+  const [deviceUsers, setDeviceUsers] = useState<any[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [employees, setEmployees] = useState<any[]>([]);
+  const [mappingUserId, setMappingUserId] = useState<string | null>(null);
+  const [selectedEmployee, setSelectedEmployee] = useState<string>('');
+  const [usersSearch, setUsersSearch] = useState('');
+  // Sync result
+  const [syncResult, setSyncResult] = useState<any>(null);
 
   // Form state
   const [formName, setFormName] = useState('');
@@ -219,15 +236,20 @@ export function DevicesSection() {
 
   async function handleSync(deviceId: string) {
     setSyncingDevices((prev) => new Set(prev).add(deviceId));
-    toast({ title: 'جاري المزامنة...', description: 'يرجى الانتظار' });
+    setSyncResult(null);
+    toast({ title: 'جاري المزامنة...', description: 'يرجى الانتظار، قد يستغرق الأمر بضع ثوان' });
     try {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
       const res = await fetch(`/api/devices/${deviceId}/sync`, { method: 'POST' });
-      if (res.ok) {
-        toast({ title: 'تمت المزامنة', description: 'تم مزامنة الجهاز بنجاح' });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSyncResult(data);
+        toast({
+          title: 'تمت المزامنة',
+          description: `${data.synced} سجل جديد، ${data.skipped} تم تجاهلهم من أصل ${data.totalLogs || '?'} سجل`
+        });
         fetchDevices();
       } else {
-        toast({ title: 'خطأ', description: 'فشل في مزامنة الجهاز', variant: 'destructive' });
+        toast({ title: 'فشلت المزامنة', description: data.error || data.message || 'فشل في مزامنة الجهاز', variant: 'destructive' });
       }
     } catch {
       toast({ title: 'خطأ', description: 'فشل في مزامنة الجهاز', variant: 'destructive' });
@@ -246,9 +268,14 @@ export function DevicesSection() {
       const res = await fetch(`/api/devices/${deviceId}/test`, { method: 'POST' });
       const data = await res.json();
       if (data.success) {
-        toast({ title: 'الاتصال ناجح', description: data.message });
+        toast({
+          title: 'الاتصال ناجح',
+          description: data.info
+            ? `${data.info.model || 'ZK-Teco'} • رقم تسلسلي: ${data.info.serialNumber || '-'} • مستخدمين: ${data.info.userCount || 0} • سجلات: ${data.info.logCount || 0}`
+            : data.message,
+        });
       } else {
-        toast({ title: 'فشل الاتصال', description: data.message, variant: 'destructive' });
+        toast({ title: 'فشل الاتصال', description: data.error || data.message, variant: 'destructive' });
       }
       fetchDevices();
     } catch {
@@ -257,6 +284,117 @@ export function DevicesSection() {
       setTestingDevices((prev) => {
         const next = new Set(prev);
         next.delete(deviceId);
+        return next;
+      });
+    }
+  }
+
+  async function handleShowUsers(device: Device) {
+    if (device.deviceType !== 'zk') {
+      toast({ title: 'غير متاح', description: 'هذه الميزة متاحة فقط لأجهزة ZK', variant: 'destructive' });
+      return;
+    }
+    setUsersDevice(device);
+    setShowUsersDialog(true);
+    setLoadingUsers(true);
+    setDeviceUsers([]);
+    setUsersSearch('');
+
+    try {
+      const [usersRes, empRes] = await Promise.all([
+        fetch(`/api/devices/${device.id}/users`),
+        fetch('/api/employees?limit=1000'),
+      ]);
+
+      if (usersRes.ok) {
+        const usersData = await usersRes.json();
+        setDeviceUsers(usersData.users || []);
+      } else {
+        const errData = await usersRes.json();
+        toast({ title: 'خطأ', description: errData.error || 'فشل جلب مستخدمي الجهاز', variant: 'destructive' });
+      }
+
+      if (empRes.ok) {
+        const empData = await empRes.json();
+        setEmployees(empData.employees || []);
+      }
+    } catch {
+      toast({ title: 'خطأ', description: 'فشل الاتصال بالجهاز', variant: 'destructive' });
+    } finally {
+      setLoadingUsers(false);
+    }
+  }
+
+  async function handleMapUser(deviceUserId: string) {
+    if (!selectedEmployee || !usersDevice) return;
+    setMappingUserId(deviceUserId);
+    try {
+      const res = await fetch(`/api/devices/${usersDevice.id}/users`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          employeeId: selectedEmployee,
+          fingerprintId: deviceUserId,
+        }),
+      });
+
+      if (res.ok) {
+        const matchedEmp = employees.find((e) => e.id === selectedEmployee);
+        toast({ title: 'تم الربط', description: `تم ربط المستخدم ${deviceUserId} بالموظف ${matchedEmp ? matchedEmp.firstName + ' ' + matchedEmp.lastName : ''}` });
+        setDeviceUsers((prev) =>
+          prev.map((u) =>
+            String(u.deviceUserId) === String(deviceUserId)
+              ? {
+                  ...u,
+                  matchedEmployee: {
+                    id: selectedEmployee,
+                    name: matchedEmp ? `${matchedEmp.firstName} ${matchedEmp.lastName}` : '',
+                    fingerprintId: deviceUserId,
+                  },
+                }
+              : u
+          )
+        );
+        setSelectedEmployee('');
+        setMappingUserId(null);
+      } else {
+        const data = await res.json();
+        toast({ title: 'خطأ', description: data.error || 'فشل ربط المستخدم', variant: 'destructive' });
+        setMappingUserId(null);
+      }
+    } catch {
+      toast({ title: 'خطأ', description: 'فشل ربط المستخدم', variant: 'destructive' });
+      setMappingUserId(null);
+    }
+  }
+
+  async function handleSyncAll() {
+    setSyncingDevices((prev) => new Set(prev).add('__all__'));
+    toast({ title: 'جاري مزامنة جميع الأجهزة...', description: 'يرجى الانتظار' });
+    try {
+      const res = await fetch('/api/devices/sync-all', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        toast({
+          title: 'تمت المزامنة',
+          description: data.message,
+        });
+        setSyncResult({
+          synced: data.totalSynced,
+          skipped: data.totalSkipped,
+          totalLogs: data.totalSynced + data.totalSkipped,
+          success: true,
+        });
+        fetchDevices();
+      } else {
+        toast({ title: 'خطأ', description: data.error || 'فشلت المزامنة', variant: 'destructive' });
+      }
+    } catch {
+      toast({ title: 'خطأ', description: 'فشل في مزامنة الأجهزة', variant: 'destructive' });
+    } finally {
+      setSyncingDevices((prev) => {
+        const next = new Set(prev);
+        next.delete('__all__');
         return next;
       });
     }
@@ -364,17 +502,28 @@ export function DevicesSection() {
           <h1 className="text-2xl font-bold text-foreground">أجهزة البصمة</h1>
           <p className="text-sm text-muted-foreground mt-1">إدارة أجهزة البصمة والتحقق من الاتصال</p>
         </div>
-        <Button
-          size="sm"
-          className="bg-emerald-600 hover:bg-emerald-700"
-          onClick={() => {
-            resetForm();
-            setShowAddDialog(true);
-          }}
-        >
-          <Plus className="h-4 w-4 ml-2" />
-          إضافة جهاز
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleSyncAll}
+            disabled={syncingDevices.size > 0}
+          >
+            <RefreshCw className={`h-4 w-4 ml-2 ${syncingDevices.size > 0 ? 'animate-spin' : ''}`} />
+            مزامنة الكل
+          </Button>
+          <Button
+            size="sm"
+            className="bg-emerald-600 hover:bg-emerald-700"
+            onClick={() => {
+              resetForm();
+              setShowAddDialog(true);
+            }}
+          >
+            <Plus className="h-4 w-4 ml-2" />
+            إضافة جهاز
+          </Button>
+        </div>
       </div>
 
       {/* Status Overview */}
@@ -413,6 +562,37 @@ export function DevicesSection() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Sync Result */}
+      {syncResult && (
+        <Card className="border-emerald-200 bg-emerald-50/50">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <Check className="h-5 w-5 text-emerald-600" />
+              <span className="font-medium text-emerald-700">نتيجة آخر مزامنة</span>
+            </div>
+            <div className="grid grid-cols-3 gap-3 text-sm">
+              <div>
+                <span className="text-muted-foreground">سجلات جديدة:</span>{' '}
+                <span className="font-bold text-emerald-600">{syncResult.synced}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">تم تجاهلهم:</span>{' '}
+                <span className="font-bold">{syncResult.skipped}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">إجمالي السجلات:</span>{' '}
+                <span className="font-bold">{syncResult.totalLogs || '-'}</span>
+              </div>
+            </div>
+            {syncResult.errors && syncResult.errors.length > 0 && (
+              <div className="mt-2 text-xs text-red-600">
+                أخطاء: {syncResult.errors.join(' | ')}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Device Cards */}
       {loading ? (
@@ -526,8 +706,19 @@ export function DevicesSection() {
                         testingDevices.has(device.id) ? 'animate-spin' : ''
                       }`}
                     />
-                    {testingDevices.has(device.id) ? 'جاري الاختبار...' : 'اختبار الاتصال'}
+                    {testingDevices.has(device.id) ? 'جاري الاختبار...' : 'اختبار'}
                   </Button>
+                  {device.deviceType === 'zk' && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-xs"
+                      onClick={() => handleShowUsers(device)}
+                    >
+                      <Users className="h-3.5 w-3.5 ml-1" />
+                      المستخدمين
+                    </Button>
+                  )}
                   <div className="flex-1" />
                   <Button
                     variant="ghost"
@@ -551,6 +742,161 @@ export function DevicesSection() {
           ))}
         </div>
       )}
+
+      {/* Device Users Dialog */}
+      <Dialog open={showUsersDialog} onOpenChange={setShowUsersDialog}>
+        <DialogContent className="max-w-2xl max-h-[85vh]" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5" />
+              مستخدمو الجهاز - {usersDevice?.name}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="mt-4 space-y-4">
+            {loadingUsers ? (
+              <div className="flex items-center justify-center py-12">
+                <RefreshCw className="h-8 w-8 animate-spin text-emerald-600" />
+                <span className="mr-3 text-muted-foreground">جاري الاتصال بالجهاز وجلب المستخدمين...</span>
+              </div>
+            ) : deviceUsers.length === 0 ? (
+              <div className="text-center py-12">
+                <AlertCircle className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
+                <p className="text-muted-foreground">لم يتم العثور على مستخدمين على الجهاز</p>
+                <p className="text-xs text-muted-foreground mt-1">تأكد من أن الجهاز متصل وحاول مرة أخرى</p>
+              </div>
+            ) : (
+              <>
+                {/* Summary */}
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-slate-50 rounded-lg p-3 text-center">
+                    <p className="text-2xl font-bold">{deviceUsers.length}</p>
+                    <p className="text-xs text-muted-foreground">إجمالي المستخدمين</p>
+                  </div>
+                  <div className="bg-emerald-50 rounded-lg p-3 text-center">
+                    <p className="text-2xl font-bold text-emerald-600">
+                      {deviceUsers.filter((u) => u.matchedEmployee).length}
+                    </p>
+                    <p className="text-xs text-muted-foreground">مرتبط</p>
+                  </div>
+                  <div className="bg-orange-50 rounded-lg p-3 text-center">
+                    <p className="text-2xl font-bold text-orange-600">
+                      {deviceUsers.filter((u) => !u.matchedEmployee).length}
+                    </p>
+                    <p className="text-xs text-muted-foreground">غير مرتبط</p>
+                  </div>
+                </div>
+
+                {/* Search */}
+                <div className="relative">
+                  <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    value={usersSearch}
+                    onChange={(e) => setUsersSearch(e.target.value)}
+                    placeholder="بحث بالاسم أو الرقم..."
+                    className="pr-9"
+                  />
+                </div>
+
+                {/* Users List */}
+                <div className="max-h-96 overflow-y-auto space-y-2">
+                  {deviceUsers
+                    .filter((u) => {
+                      if (!usersSearch) return true;
+                      const q = usersSearch.toLowerCase();
+                      return (
+                        String(u.deviceUserId).includes(q) ||
+                        (u.name && u.name.toLowerCase().includes(q))
+                      );
+                    })
+                    .map((user) => (
+                      <div
+                        key={user.deviceUserId}
+                        className={`border rounded-lg p-3 flex items-center justify-between gap-3 ${
+                          user.matchedEmployee ? 'border-emerald-200 bg-emerald-50/50' : 'border-orange-200 bg-orange-50/30'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div
+                            className={`h-9 w-9 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${
+                              user.matchedEmployee
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : 'bg-orange-100 text-orange-700'
+                            }`}
+                          >
+                            {user.deviceUserId}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-medium text-sm truncate">
+                              {user.name || `مستخدم ${user.deviceUserId}`}
+                            </p>
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                              <span>رقم الجهاز: {user.deviceUserId}</span>
+                              {user.cardNo && <span>• بطاقة: {user.cardNo}</span>}
+                            </div>
+                            {user.matchedEmployee && (
+                              <div className="flex items-center gap-1 mt-1">
+                                <Link2 className="h-3 w-3 text-emerald-600" />
+                                <span className="text-xs text-emerald-600 font-medium">
+                                  {user.matchedEmployee.name}
+                                </span>
+                                <Check className="h-3 w-3 text-emerald-600" />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {user.matchedEmployee ? (
+                          <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 border-emerald-200 text-xs shrink-0">
+                            مرتبط
+                          </Badge>
+                        ) : (
+                          <div className="flex items-center gap-2 shrink-0">
+                            <Select
+                              value={mappingUserId === String(user.deviceUserId) ? selectedEmployee : ''}
+                              onValueChange={(val) => {
+                                setMappingUserId(String(user.deviceUserId));
+                                setSelectedEmployee(val);
+                              }}
+                            >
+                              <SelectTrigger className="h-8 w-40 text-xs">
+                                <SelectValue placeholder="اختر موظف" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {employees
+                                  .filter(
+                                    (e) =>
+                                      !e.fingerprintId ||
+                                      String(e.fingerprintId) === String(user.deviceUserId)
+                                  )
+                                  .map((emp) => (
+                                    <SelectItem key={emp.id} value={emp.id}>
+                                      {emp.firstName} {emp.lastName}
+                                    </SelectItem>
+                                  ))}
+                              </SelectContent>
+                            </Select>
+                            <Button
+                              size="sm"
+                              className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700"
+                              disabled={
+                                mappingUserId === String(user.deviceUserId)
+                                  ? !selectedEmployee
+                                  : true
+                              }
+                              onClick={() => handleMapUser(String(user.deviceUserId))}
+                            >
+                              ربط
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                </div>
+              </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Add Device Dialog */}
       <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
