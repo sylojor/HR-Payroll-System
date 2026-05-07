@@ -7,6 +7,16 @@ let nextProcess;
 
 const isDev = !app.isPackaged;
 
+// Database path - use AppData on Windows for production
+function getDatabasePath() {
+  if (isDev) {
+    return path.join(__dirname, '..', 'db', 'custom.db');
+  }
+  // On Windows production, store DB in AppData
+  const appDataPath = app.getPath('userData');
+  return path.join(appDataPath, 'custom.db');
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -18,6 +28,7 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
       devTools: isDev,
     },
     show: false,
@@ -33,8 +44,8 @@ function createWindow() {
     mainWindow.loadURL('http://localhost:3000');
     mainWindow.webContents.openDevTools();
   } else {
-    // In production, load from the standalone build
-    mainWindow.loadFile(path.join(__dirname, '..', 'out', 'index.html'));
+    // In production, connect to the local Next.js server
+    mainWindow.loadURL('http://localhost:3000');
   }
 
   mainWindow.once('ready-to-show', () => {
@@ -55,11 +66,21 @@ function createWindow() {
 
 function startNextServer() {
   if (!isDev) {
-    // Start the standalone Next.js server in production
-    const serverPath = path.join(__dirname, '..', '.next', 'standalone', 'server.js');
+    const standalonePath = path.join(process.resourcesPath, 'standalone');
+    const serverPath = path.join(standalonePath, 'server.js');
+    
+    // Set up environment for the Next.js server
+    const env = {
+      ...process.env,
+      PORT: '3000',
+      HOSTNAME: 'localhost',
+      NODE_ENV: 'production',
+      DATABASE_URL: `file:${getDatabasePath()}`,
+    };
+
     nextProcess = spawn(process.execPath, [serverPath], {
-      cwd: path.join(__dirname, '..'),
-      env: { ...process.env, PORT: '3000', HOSTNAME: 'localhost' },
+      cwd: standalonePath,
+      env,
       stdio: 'pipe',
     });
 
@@ -68,17 +89,47 @@ function startNextServer() {
     });
 
     nextProcess.stderr?.on('data', (data) => {
-      console.error(`[Next.js] ${data}`);
+      console.error(`[Next.js Error] ${data}`);
+    });
+
+    nextProcess.on('error', (err) => {
+      console.error('Failed to start Next.js server:', err);
     });
   }
 }
 
+function ensureDatabaseExists() {
+  const fs = require('fs');
+  const dbPath = getDatabasePath();
+  const dbDir = path.dirname(dbPath);
+  
+  if (!isDev) {
+    // Ensure AppData directory exists
+    if (!fs.existsSync(dbDir)) {
+      fs.mkdirSync(dbDir, { recursive: true });
+    }
+    
+    // If no DB exists in AppData, copy the default one
+    if (!fs.existsSync(dbPath)) {
+      const defaultDbPath = path.join(process.resourcesPath, 'db', 'custom.db');
+      if (fs.existsSync(defaultDbPath)) {
+        fs.copyFileSync(defaultDbPath, dbPath);
+        console.log('Database copied to:', dbPath);
+      } else {
+        console.warn('Default database not found at:', defaultDbPath);
+      }
+    }
+  }
+}
+
 app.whenReady().then(() => {
+  ensureDatabaseExists();
+  
   if (isDev) {
     createWindow();
   } else {
     startNextServer();
-    // Wait a bit for the server to start
+    // Wait for the server to start
     setTimeout(() => {
       createWindow();
     }, 3000);

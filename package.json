@@ -104,44 +104,64 @@
   },
   "build": {
     "appId": "com.hr-system.payroll",
-    "productName": "نظام الموارد البشرية والرواتب",
+    "productName": "HR-Payroll-System",
     "directories": {
       "output": "dist-electron"
     },
+    "npmRebuild": false,
     "files": [
-      "electron/**/*",
-      ".next/standalone/**/*",
-      ".next/static/**/*",
-      "public/**/*",
-      "db/**/*",
-      "prisma/**/*",
-      "node_modules/.prisma/**/*",
-      "node_modules/@prisma/**/*",
-      "!node_modules/**/{test,tests,__tests__,spec}/**"
+      "electron/**/*"
     ],
     "extraResources": [
       {
-        "from": "db/custom.db",
-        "to": "db/custom.db"
+        "from": ".next/standalone",
+        "to": "standalone",
+        "filter": ["**/*"]
+      },
+      {
+        "from": ".next/static",
+        "to": "standalone/.next/static",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "public",
+        "to": "standalone/public",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "db",
+        "to": "db",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "prisma",
+        "to": "prisma",
+        "filter": ["**/*", "!**/migrations/**"]
+      },
+      {
+        "from": "node_modules/.prisma",
+        "to": "standalone/node_modules/.prisma",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "node_modules/@prisma",
+        "to": "standalone/node_modules/@prisma",
+        "filter": ["**/*", "!**/test/**", "!**/tests/**"]
+      },
+      {
+        "from": "node_modules/node-zklib",
+        "to": "standalone/node_modules/node-zklib",
+        "filter": ["**/*"]
       }
     ],
     "win": {
       "target": [
         {
-          "target": "nsis",
+          "target": "dir",
           "arch": ["x64"]
         }
       ],
-      "icon": "public/logo.svg"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "installerLanguages": ["ar"],
-      "language": 1025,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "نظام الموارد البشرية"
+      "icon": "build/icon.png"
     }
   }
 }

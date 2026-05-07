@@ -9,10 +9,10 @@
  */
 
 import { db } from '@/lib/db';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
-
-const execFileAsync = promisify(execFile);
+import { exec } from 'child_process';
+import { writeFileSync, unlinkSync, mkdtempSync, rmdirSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 
 interface ZKDeviceConfig {
   id: string;
@@ -27,19 +27,26 @@ interface ZKDeviceConfig {
 
 /**
  * Run ZK operations in an isolated child process to prevent Next.js crashes
+ * Uses temp file approach to avoid Turbopack module resolution issues
  */
 function runZKScript(script: string, timeout: number = 15000): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = execFile(
-      'node',
-      ['-e', script],
+    const tmpDir = mkdtempSync(join(tmpdir(), 'zk-'));
+    const tmpFile = join(tmpDir, 'zk-script.js');
+    writeFileSync(tmpFile, script);
+
+    const child = exec(
+      `node "${tmpFile}"`,
       { 
         timeout,
         maxBuffer: 1024 * 1024,
       },
       (error, stdout, stderr) => {
+        // Clean up temp file
+        try { unlinkSync(tmpFile); } catch {}
+        try { rmdirSync(tmpDir); } catch {}
+        
         if (error) {
-          // Kill any zombie processes
           try { child.kill(); } catch {}
           reject(new Error(stderr || error.message || 'فشل الاتصال بجهاز البصمة'));
         } else {
