@@ -53,19 +53,34 @@ export async function PUT(request: NextRequest) {
     })
 
     // Create audit log
-    await db.auditLog.create({
-      data: {
-        userId: user.id,
-        action: 'PASSWORD_CHANGE',
-        entity: 'User',
-        entityId: user.id,
-        details: `User ${user.username} changed their password`,
-      },
-    })
+    try {
+      await db.auditLog.create({
+        data: {
+          userId: user.id,
+          action: 'PASSWORD_CHANGE',
+          entity: 'User',
+          entityId: user.id,
+          details: `User ${user.username} changed their password`,
+        },
+      })
+    } catch {
+      // Non-critical
+    }
 
     return NextResponse.json({ message: 'Password updated successfully' })
   } catch (error) {
     console.error('Change password error:', error)
+
+    if (error instanceof Error) {
+      const msg = error.message
+      if (msg.includes('Error code 14') || msg.includes('Unable to open the database file')) {
+        return NextResponse.json(
+          { error: 'Unable to connect to the database. Please try again.' },
+          { status: 503 }
+        )
+      }
+    }
+
     const message = error instanceof Error ? error.message : 'Failed to change password'
     return NextResponse.json({ error: message }, { status: 500 })
   }

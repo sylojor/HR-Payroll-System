@@ -26,7 +26,17 @@ interface SetupBody {
 export async function POST(request: NextRequest) {
   try {
     // Check if any users exist - if yes, setup already done
-    const userCount = await db.user.count()
+    let userCount = 0
+    try {
+      userCount = await db.user.count()
+    } catch (dbError) {
+      console.error('Database connection error during setup check:', dbError)
+      return NextResponse.json(
+        { error: 'Unable to connect to the database. Please restart the application and try again. If the problem persists, the database may need to be reinitialized.' },
+        { status: 503 }
+      )
+    }
+
     if (userCount > 0) {
       return NextResponse.json(
         { error: 'Setup has already been completed. Users already exist.' },
@@ -140,7 +150,38 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     console.error('Setup error:', error)
-    const message = error instanceof Error ? error.message : 'Setup failed'
-    return NextResponse.json({ error: message }, { status: 500 })
+
+    // Provide user-friendly error messages
+    if (error instanceof Error) {
+      const msg = error.message
+
+      // Database connectivity errors
+      if (msg.includes('Error code 14') || msg.includes('Unable to open the database file')) {
+        return NextResponse.json(
+          { error: 'Unable to connect to the database. Please restart the application and try again.' },
+          { status: 503 }
+        )
+      }
+
+      // Table doesn't exist errors
+      if (msg.includes('does not exist') || msg.includes('no such table')) {
+        return NextResponse.json(
+          { error: 'Database tables not found. The application needs to be restarted to initialize the database.' },
+          { status: 503 }
+        )
+      }
+
+      // Unique constraint violation
+      if (msg.includes('Unique constraint') || msg.includes('already exists')) {
+        return NextResponse.json(
+          { error: 'A user with this username already exists.' },
+          { status: 409 }
+        )
+      }
+
+      return NextResponse.json({ error: msg }, { status: 500 })
+    }
+
+    return NextResponse.json({ error: 'Setup failed. Please try again.' }, { status: 500 })
   }
 }

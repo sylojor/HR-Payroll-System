@@ -23,7 +23,7 @@ function log(msg) {
 }
 
 log('=== Attindo Starting ===');
-log('Version: 1.5.0');
+log('Version: 1.6.0');
 log('Mode: ' + (isDev ? 'Development' : 'Production'));
 log('App Path: ' + app.getAppPath());
 log('Resources: ' + process.resourcesPath);
@@ -448,6 +448,28 @@ function waitForServer(port, maxRetries = 40) {
   });
 }
 
+// ========== CHECK DATABASE HEALTH ==========
+async function checkDatabaseHealth() {
+  try {
+    const res = await fetch(`http://localhost:${nextPort}/api/db-health`);
+    if (res.ok) {
+      const health = await res.json();
+      log('Database health: ' + JSON.stringify(health));
+      if (health.status === 'unhealthy') {
+        log('⚠️ Database is unhealthy! Errors: ' + health.errors.join('; '));
+        return false;
+      }
+      return true;
+    } else {
+      log('Health check endpoint returned status ' + res.status);
+      return false;
+    }
+  } catch (e) {
+    log('Health check failed: ' + e.message);
+    return false;
+  }
+}
+
 // ========== SEED DATABASE ==========
 async function seedViaApi() {
   try {
@@ -606,7 +628,7 @@ function createSplashWindow() {
       <div class="title">Attindo</div>
       <div class="subtitle">HR & Payroll System</div>
       <div class="loader"><div class="loader-bar"></div></div>
-      <div class="version">v1.5.0</div>
+      <div class="version">v1.6.0</div>
     </body>
     </html>
   `;
@@ -651,7 +673,7 @@ function createMenu() {
             dialog.showMessageBox(mainWindow, {
               type: 'info', title: 'About Attindo',
               message: 'Attindo - HR & Payroll System',
-              detail: 'Version 1.5.0\n\nProfessional HR & Payroll Management System\n\nLog file: ' + logFile,
+              detail: 'Version 1.6.0\n\nProfessional HR & Payroll Management System\n\nLog file: ' + logFile,
             });
           },
         },
@@ -703,7 +725,11 @@ ipcMain.handle('retry-server', async () => {
     showLoadingPage(mainWindow);
     await startNextServer();
     await waitForServer(nextPort, 20);
-    await seedViaApi();
+    const dbHealthy = await checkDatabaseHealth();
+    if (!dbHealthy) {
+      log('Database unhealthy on retry, attempting prisma db push...');
+      await runPrismaDbPush();
+    }
     mainWindow.loadURL(`http://localhost:${nextPort}`);
     return true;
   } catch (e) {
@@ -765,7 +791,13 @@ app.whenReady().then(async () => {
     }
 
     if (serverReady) {
-      await seedViaApi();
+      // Check database health after server is ready
+      const dbHealthy = await checkDatabaseHealth();
+      if (dbHealthy) {
+        log('✅ Database is healthy');
+      } else {
+        log('⚠️ Database health check failed or returned unhealthy');
+      }
     }
 
     if (splash) splash.close();

@@ -1,25 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { readFile, writeFile, rename, unlink } from 'fs/promises'
+import { readFile, writeFile, rename, unlink, mkdir } from 'fs/promises'
 import { existsSync } from 'fs'
 import path from 'path'
 
 function getDbPath(): string | null {
   const dbUrl = process.env.DATABASE_URL || ''
-  // Parse the SQLite file path from the DATABASE_URL
-  // Possible formats:
-  //   file:./db/attindo.db (relative)
-  //   file:/C:/Users/.../attindo.db (absolute Windows)
-  //   file:/home/.../attindo.db (absolute Unix)
+
   if (!dbUrl.startsWith('file:')) {
     return null
   }
 
   let filePath = dbUrl.replace(/^file:/, '')
 
+  // Handle triple-slash format: file:///home/... -> /home/...
+  if (filePath.startsWith('///')) {
+    filePath = filePath.slice(2) // Keep one leading slash for Unix
+  }
+  // Handle double-slash format: file://C:/... -> C:/... (Windows network path)
+  else if (filePath.startsWith('//')) {
+    filePath = filePath.slice(1) // Keep one slash
+  }
+
   // Handle Windows absolute paths: file:/C:/Users/... -> C:/Users/...
   // On Windows, the path after file: has a leading slash before the drive letter
   if (process.platform === 'win32') {
-    // file:/C:/Users/... -> /C:/Users/... -> C:/Users/...
     if (filePath.match(/^\/[A-Za-z]:\//)) {
       filePath = filePath.slice(1)
     }
@@ -30,17 +34,49 @@ function getDbPath(): string | null {
     return filePath
   }
 
-  // Relative path - resolve relative to cwd (which is the standalone dir in production)
+  // Relative path - resolve relative to cwd
   return path.resolve(process.cwd(), filePath.replace(/^\.\//, ''))
+}
+
+/**
+ * Ensure the database file exists and the directory is writable.
+ * This is a safety check before performing backup/restore operations.
+ */
+async function ensureDatabaseAccessible(): Promise<string | null> {
+  const dbPath = getDbPath()
+
+  if (!dbPath) {
+    console.error('[backup] Cannot determine database path from DATABASE_URL:', process.env.DATABASE_URL)
+    return null
+  }
+
+  // Check if the parent directory exists
+  const dbDir = path.dirname(dbPath)
+  if (!existsSync(dbDir)) {
+    try {
+      await mkdir(dbDir, { recursive: true })
+      console.log('[backup] Created database directory:', dbDir)
+    } catch (err) {
+      console.error('[backup] Failed to create database directory:', dbDir, err)
+      return null
+    }
+  }
+
+  if (!existsSync(dbPath)) {
+    console.error('[backup] Database file does not exist at:', dbPath)
+    return null
+  }
+
+  return dbPath
 }
 
 export async function GET() {
   try {
-    const dbPath = getDbPath()
+    const dbPath = await ensureDatabaseAccessible()
 
-    if (!dbPath || !existsSync(dbPath)) {
+    if (!dbPath) {
       return NextResponse.json(
-        { error: 'Database file not found' },
+        { error: 'Database file not found. Please ensure the application is properly set up.' },
         { status: 404 }
       )
     }
@@ -103,6 +139,12 @@ export async function POST(request: NextRequest) {
         { error: 'Invalid database file. The file is not a valid SQLite database.' },
         { status: 400 }
       )
+    }
+
+    // Ensure the parent directory exists
+    const dbDir = path.dirname(dbPath)
+    if (!existsSync(dbDir)) {
+      await mkdir(dbDir, { recursive: true })
     }
 
     // Create backup of current database before overwriting

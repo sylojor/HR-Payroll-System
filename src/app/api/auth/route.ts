@@ -18,9 +18,18 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const user = await db.user.findUnique({
-      where: { username },
-    })
+    let user
+    try {
+      user = await db.user.findUnique({
+        where: { username },
+      })
+    } catch (dbError) {
+      console.error('Database error during login:', dbError)
+      return NextResponse.json(
+        { error: 'Unable to connect to the database. Please restart the application and try again.' },
+        { status: 503 }
+      )
+    }
 
     if (!user) {
       return NextResponse.json(
@@ -44,21 +53,29 @@ export async function POST(request: NextRequest) {
     }
 
     // Update last login
-    await db.user.update({
-      where: { id: user.id },
-      data: { lastLogin: new Date() },
-    })
+    try {
+      await db.user.update({
+        where: { id: user.id },
+        data: { lastLogin: new Date() },
+      })
+    } catch {
+      // Non-critical - don't fail login if this update fails
+    }
 
     // Create audit log
-    await db.auditLog.create({
-      data: {
-        userId: user.id,
-        action: 'LOGIN',
-        entity: 'User',
-        entityId: user.id,
-        details: `User ${username} logged in`,
-      },
-    })
+    try {
+      await db.auditLog.create({
+        data: {
+          userId: user.id,
+          action: 'LOGIN',
+          entity: 'User',
+          entityId: user.id,
+          details: `User ${username} logged in`,
+        },
+      })
+    } catch {
+      // Non-critical - don't fail login if audit log fails
+    }
 
     return NextResponse.json({
       user: {
@@ -73,7 +90,24 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     console.error('Auth error:', error)
-    const message = error instanceof Error ? error.message : 'Authentication failed'
-    return NextResponse.json({ error: message }, { status: 500 })
+
+    // Provide user-friendly error messages
+    if (error instanceof Error) {
+      const msg = error.message
+      if (msg.includes('Error code 14') || msg.includes('Unable to open the database file')) {
+        return NextResponse.json(
+          { error: 'Unable to connect to the database. Please restart the application and try again.' },
+          { status: 503 }
+        )
+      }
+      if (msg.includes('does not exist') || msg.includes('no such table')) {
+        return NextResponse.json(
+          { error: 'Database not initialized. Please set up the application first.' },
+          { status: 503 }
+        )
+      }
+    }
+
+    return NextResponse.json({ error: 'Authentication failed. Please try again.' }, { status: 500 })
   }
 }
