@@ -1,6 +1,6 @@
 const { app, BrowserWindow, Menu, shell, dialog, ipcMain } = require('electron');
 const path = require('path');
-const { spawn, execSync } = require('child_process');
+const { spawn } = require('child_process');
 const fs = require('fs');
 const http = require('http');
 
@@ -23,7 +23,7 @@ function log(msg) {
 }
 
 log('=== Attindo Starting ===');
-log('Version: 1.8.0');
+log('Version: 1.9.0');
 log('Mode: ' + (isDev ? 'Development' : 'Production'));
 log('App Path: ' + app.getAppPath());
 log('Resources: ' + process.resourcesPath);
@@ -53,10 +53,14 @@ function getDatabaseUrl() {
 }
 
 /**
- * Initialize the database by copying the template database from resources.
- * This is the MOST RELIABLE way to ensure the database has all tables:
- * we pre-create the database during the CI build and bundle it.
- * No need for `prisma db push` at runtime!
+ * Initialize the database.
+ * Strategy:
+ * 1. If database file exists with content -> use it ✅
+ * 2. Try to copy template.db from resources -> best option ✅
+ * 3. Create empty database file -> Next.js API will create tables via raw SQL ✅
+ *
+ * NO MORE npx prisma db push! The Next.js API routes use raw SQL
+ * to create tables, which works without any CLI tools.
  */
 function initializeDatabase() {
   const dbPath = getDatabasePath();
@@ -97,116 +101,28 @@ function initializeDatabase() {
     }
   }
 
+  // No template database found - create empty file
+  // The Next.js API routes will create tables using raw SQL automatically
   log('⚠️ No template database found in resources');
-  log('Will attempt prisma db push as fallback...');
-
-  // Fallback: try prisma db push
-  return runPrismaDbPush();
+  log('Creating empty database file - tables will be created by the API...');
+  try {
+    // Make sure data directory exists
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    fs.writeFileSync(dbPath, '');
+    log('Empty database file created: ' + dbPath + ' ✅');
+    log('Tables will be created automatically via API raw SQL when needed');
+    return true;
+  } catch (e) {
+    log('Failed to create database file: ' + e.message);
+    return false;
+  }
 }
 
-// ========== PRISMA DB PUSH (FALLBACK) ==========
-function runPrismaDbPush() {
-  return new Promise((resolve) => {
-    const standaloneDir = findStandaloneDir();
-    if (!standaloneDir) {
-      log('Standalone directory not found, cannot run prisma db push');
-      resolve(false);
-      return;
-    }
-
-    const nodeBinary = findNodeBinary();
-    const dbUrl = getDatabaseUrl();
-
-    // Find prisma CLI
-    const prismaLocations = [
-      path.join(standaloneDir, '.next', 'node_modules', 'prisma', 'build', 'index.js'),
-      path.join(standaloneDir, 'node_modules', 'prisma', 'build', 'index.js'),
-    ];
-
-    let prismaCli = null;
-    for (const loc of prismaLocations) {
-      if (fs.existsSync(loc)) {
-        prismaCli = loc;
-        log('Found Prisma CLI at: ' + loc);
-        break;
-      }
-    }
-
-    const schemaPath = path.join(standaloneDir, 'prisma', 'schema.prisma');
-    if (!fs.existsSync(schemaPath)) {
-      log('⚠️ Prisma schema not found, skipping db push');
-      resolve(false);
-      return;
-    }
-
-    if (!prismaCli) {
-      log('⚠️ Prisma CLI not found, skipping db push');
-      resolve(false);
-      return;
-    }
-
-    log('Running prisma db push (fallback)...');
-    log('  DATABASE_URL: ' + dbUrl);
-
-    const env = {
-      ...process.env,
-      DATABASE_URL: dbUrl,
-      NODE_ENV: 'production',
-    };
-
-    if (nodeBinary === process.execPath) {
-      env.ELECTRON_RUN_AS_NODE = '1';
-    }
-
-    const prismaProc = spawn(nodeBinary, [prismaCli, 'db', 'push', '--schema', schemaPath, '--skip-generate', '--accept-data-loss'], {
-      env,
-      cwd: standaloneDir,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    let output = '';
-
-    prismaProc.stdout.on('data', (data) => {
-      const text = data.toString();
-      output += text;
-      log('[prisma] ' + text.trim());
-    });
-
-    prismaProc.stderr.on('data', (data) => {
-      const text = data.toString();
-      output += text;
-      log('[prisma stderr] ' + text.trim());
-    });
-
-    prismaProc.on('error', (err) => {
-      log('prisma db push spawn error: ' + err.message);
-      resolve(false);
-    });
-
-    prismaProc.on('close', (code) => {
-      if (code === 0) {
-        log('✅ prisma db push completed');
-        resolve(true);
-      } else {
-        log('⚠️ prisma db push exited with code ' + code);
-        const dbPath = getDatabasePath();
-        if (fs.existsSync(dbPath) && fs.statSync(dbPath).size > 0) {
-          log('Database file exists with content, continuing...');
-          resolve(true);
-        } else {
-          resolve(false);
-        }
-      }
-    });
-
-    // Timeout after 30 seconds
-    setTimeout(() => {
-      log('prisma db push timeout, killing process');
-      prismaProc.kill();
-      resolve(false);
-    }, 30000);
-  });
-}
+// NOTE: runPrismaDbPush() has been REMOVED.
+// Database tables are now created via raw SQL in the Next.js API routes.
+// No more dependency on npx or prisma CLI at runtime!
 
 // ========== FIND NODE.JS BINARY ==========
 function findNodeBinary() {
@@ -676,7 +592,7 @@ function createSplashWindow() {
       <div class="title">Attindo</div>
       <div class="subtitle">HR & Payroll System</div>
       <div class="loader"><div class="loader-bar"></div></div>
-      <div class="version">v1.8.0</div>
+      <div class="version">v1.9.0</div>
     </body>
     </html>
   `;
@@ -721,7 +637,7 @@ function createMenu() {
             dialog.showMessageBox(mainWindow, {
               type: 'info', title: 'About Attindo',
               message: 'Attindo - HR & Payroll System',
-              detail: 'Version 1.8.0\n\nProfessional HR & Payroll Management System\n\nLog file: ' + logFile,
+              detail: 'Version 1.9.0\n\nProfessional HR & Payroll Management System\n\nLog file: ' + logFile,
             });
           },
         },
@@ -757,7 +673,7 @@ function createMenu() {
 }
 
 // ========== IPC ==========
-ipcMain.handle('get-app-version', () => '1.8.0');
+ipcMain.handle('get-app-version', () => '1.9.0');
 ipcMain.handle('get-database-path', () => getDatabasePath());
 ipcMain.handle('get-log-path', () => logFile);
 ipcMain.handle('show-open-dialog', async (e, opts) => dialog.showOpenDialog(mainWindow, opts));

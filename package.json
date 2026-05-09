@@ -1,6 +1,6 @@
 {
   "name": "attindo",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "Attindo - Professional HR & Payroll Management System with ZK Fingerprint Support",
   "main": "electron/main.js",
   "author": "Attindo",

@@ -1,75 +1,32 @@
 import { db } from '@/lib/db'
 import { NextRequest, NextResponse } from 'next/server'
-import { exec } from 'child_process'
-import { existsSync, mkdirSync, writeFileSync } from 'fs'
-import path from 'path'
-
-function getDbPath(): string | null {
-  const dbUrl = process.env.DATABASE_URL || ''
-  if (!dbUrl.startsWith('file:')) return null
-
-  let filePath = dbUrl.replace(/^file:/, '')
-
-  if (filePath.startsWith('///')) {
-    filePath = filePath.slice(2)
-  } else if (filePath.startsWith('//')) {
-    filePath = filePath.slice(1)
-  }
-
-  if (process.platform === 'win32') {
-    if (filePath.match(/^\/[A-Za-z]:\//)) {
-      filePath = filePath.slice(1)
-    }
-  }
-
-  if (path.isAbsolute(filePath)) return filePath
-  return path.resolve(process.cwd(), filePath.replace(/^\.\//, ''))
-}
+import { createAllTables, ensureDatabaseFile } from '@/lib/db-schema'
 
 /**
- * Try to ensure database schema exists by running prisma db push
+ * Try to ensure database schema exists by creating tables using raw SQL.
+ * No dependency on npx or prisma CLI - works in Electron production builds.
  */
 async function ensureDatabaseSchema(): Promise<boolean> {
   try {
-    // First, check if the database file exists
-    const dbPath = getDbPath()
-    if (dbPath) {
-      const dbDir = path.dirname(dbPath)
-      if (!existsSync(dbDir)) {
-        mkdirSync(dbDir, { recursive: true })
-      }
-      if (!existsSync(dbPath)) {
-        writeFileSync(dbPath, '')
-      }
-    }
+    // First, ensure the database file exists
+    ensureDatabaseFile()
 
     // Try a simple query to see if tables exist
     await db.user.count()
     return true
   } catch {
-    // Tables don't exist - try to create them using async exec
+    // Tables don't exist - create them using raw SQL
     try {
-      console.log('[setup] Database tables not found, running prisma db push...')
-      const result = await new Promise<{success: boolean, error?: string}>((resolve) => {
-        exec('npx prisma db push --accept-data-loss --skip-generate', {
-          timeout: 120000,
-          env: { ...process.env },
-        }, (error) => {
-          if (error) {
-            console.error('[setup] prisma db push failed:', error.message)
-            resolve({ success: false, error: error.message })
-          } else {
-            resolve({ success: true })
-          }
-        })
-      })
+      console.log('[setup] Database tables not found, creating via raw SQL...')
+      const result = await createAllTables(db)
       if (result.success) {
-        console.log('[setup] prisma db push completed successfully')
+        console.log('[setup] Database tables created successfully')
         return true
       }
+      console.error('[setup] Failed to create tables:', result.error)
       return false
-    } catch (pushError) {
-      console.error('[setup] prisma db push failed:', pushError)
+    } catch (createError) {
+      console.error('[setup] Table creation failed:', createError)
       return false
     }
   }
@@ -103,7 +60,7 @@ export async function POST(request: NextRequest) {
     const schemaReady = await ensureDatabaseSchema()
     if (!schemaReady) {
       return NextResponse.json(
-        { error: 'Unable to initialize the database schema. Please run "npx prisma db push" manually and restart the application.' },
+        { error: 'Unable to initialize the database schema. Please restart the application and try again.' },
         { status: 503 }
       )
     }

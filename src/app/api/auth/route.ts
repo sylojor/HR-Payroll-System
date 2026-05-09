@@ -1,20 +1,6 @@
 import { db } from '@/lib/db'
 import { NextRequest, NextResponse } from 'next/server'
-import { exec } from 'child_process'
-import { existsSync, mkdirSync, writeFileSync } from 'fs'
-import path from 'path'
-
-function getDbPath(): string | null {
-  const dbUrl = process.env.DATABASE_URL || ''
-  if (!dbUrl.startsWith('file:')) return null
-
-  let filePath = dbUrl.replace(/^file:/, '')
-  if (filePath.startsWith('///')) filePath = filePath.slice(2)
-  else if (filePath.startsWith('//')) filePath = filePath.slice(1)
-  if (process.platform === 'win32' && filePath.match(/^\/[A-Za-z]:\//)) filePath = filePath.slice(1)
-  if (path.isAbsolute(filePath)) return filePath
-  return path.resolve(process.cwd(), filePath.replace(/^\.\//, ''))
-}
+import { createAllTables, ensureDatabaseFile } from '@/lib/db-schema'
 
 interface LoginBody {
   username: string
@@ -42,30 +28,13 @@ export async function POST(request: NextRequest) {
       console.error('Database error during login:', dbError)
       const msg = dbError instanceof Error ? dbError.message : ''
 
-      // If tables don't exist, try to auto-initialize
+      // If tables don't exist, try to auto-initialize using raw SQL
       if (msg.includes('does not exist') || msg.includes('no such table') || msg.includes('Error code 14')) {
         try {
-          const dbPath = getDbPath()
-          if (dbPath) {
-            const dbDir = path.dirname(dbPath)
-            if (!existsSync(dbDir)) mkdirSync(dbDir, { recursive: true })
-            if (!existsSync(dbPath)) writeFileSync(dbPath, '')
-          }
-          console.log('[auth] Auto-initializing database...')
-          const result = await new Promise<boolean>((resolve) => {
-            exec('npx prisma db push --accept-data-loss --skip-generate', {
-              timeout: 120000,
-              env: { ...process.env },
-            }, (error) => {
-              if (error) {
-                console.error('[auth] Auto-init failed:', error.message)
-                resolve(false)
-              } else {
-                resolve(true)
-              }
-            })
-          })
-          if (result) {
+          console.log('[auth] Auto-initializing database via raw SQL...')
+          ensureDatabaseFile()
+          const result = await createAllTables(db)
+          if (result.success) {
             // Retry the query after initialization
             user = await db.user.findUnique({ where: { username } })
           }

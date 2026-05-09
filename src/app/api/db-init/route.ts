@@ -1,47 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { exec } from 'child_process'
-import { existsSync, mkdirSync, writeFileSync } from 'fs'
-import path from 'path'
-
-function getDbPath(): string | null {
-  const dbUrl = process.env.DATABASE_URL || ''
-  if (!dbUrl.startsWith('file:')) return null
-
-  let filePath = dbUrl.replace(/^file:/, '')
-
-  if (filePath.startsWith('///')) {
-    filePath = filePath.slice(2)
-  } else if (filePath.startsWith('//')) {
-    filePath = filePath.slice(1)
-  }
-
-  if (process.platform === 'win32') {
-    if (filePath.match(/^\/[A-Za-z]:\//)) {
-      filePath = filePath.slice(1)
-    }
-  }
-
-  if (path.isAbsolute(filePath)) return filePath
-  return path.resolve(process.cwd(), filePath.replace(/^\.\//, ''))
-}
-
-function runPrismaDbPush(): Promise<{ success: boolean; error?: string }> {
-  return new Promise((resolve) => {
-    exec('npx prisma db push --accept-data-loss --skip-generate', {
-      timeout: 120000,
-      env: { ...process.env },
-    }, (error, stdout, stderr) => {
-      if (error) {
-        console.error('[db-init] prisma db push failed:', error.message)
-        console.error('[db-init] stderr:', stderr)
-        resolve({ success: false, error: error.message.substring(0, 300) })
-      } else {
-        console.log('[db-init] prisma db push completed successfully')
-        resolve({ success: true })
-      }
-    })
-  })
-}
+import { db } from '@/lib/db'
+import { createAllTables, ensureDatabaseFile } from '@/lib/db-schema'
 
 export async function POST(request: NextRequest) {
   try {
@@ -49,22 +8,11 @@ export async function POST(request: NextRequest) {
     const seed = body.seed === true
     const seedOnly = body.seedOnly === true
 
-    // Step 1: Ensure database directory exists and create empty file if needed
-    const dbPath = getDbPath()
-    if (dbPath) {
-      const dbDir = path.dirname(dbPath)
-      if (!existsSync(dbDir)) {
-        mkdirSync(dbDir, { recursive: true })
-        console.log('[db-init] Created database directory:', dbDir)
-      }
-      if (!existsSync(dbPath)) {
-        writeFileSync(dbPath, '')
-        console.log('[db-init] Created empty database file:', dbPath)
-      }
-    }
+    // Step 1: Ensure database file exists
+    ensureDatabaseFile()
 
     if (seedOnly) {
-      // Just seed data, don't run prisma db push
+      // Just seed data, don't create tables
       try {
         const seedResult = await seedDefaultData()
         return NextResponse.json({
@@ -81,11 +29,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Step 2: Run prisma db push to create tables (async)
-    const pushResult = await runPrismaDbPush()
-    if (!pushResult.success) {
+    // Step 2: Create all tables using raw SQL (no npx needed!)
+    const createResult = await createAllTables(db)
+    if (!createResult.success) {
       return NextResponse.json(
-        { error: 'Failed to initialize database schema: ' + pushResult.error },
+        { error: 'Failed to initialize database schema: ' + (createResult.error || 'Unknown error') },
         { status: 500 }
       )
     }
@@ -123,18 +71,15 @@ export async function POST(request: NextRequest) {
 }
 
 async function seedDefaultData() {
-  const { PrismaClient } = await import('@prisma/client')
-  const prisma = new PrismaClient()
-
   try {
     // Check if admin already exists
-    const existingAdmin = await prisma.user.findUnique({ where: { username: 'admin' } })
+    const existingAdmin = await db.user.findUnique({ where: { username: 'admin' } })
     if (existingAdmin) {
       return { adminExisted: true, user: { username: 'admin' } }
     }
 
     // Create default admin user
-    const admin = await prisma.user.create({
+    const admin = await db.user.create({
       data: {
         username: 'admin',
         password: 'admin123',
@@ -146,9 +91,9 @@ async function seedDefaultData() {
     })
 
     // Create default company if none exists
-    const existingCompany = await prisma.company.findFirst()
+    const existingCompany = await db.company.findFirst()
     if (!existingCompany) {
-      await prisma.company.create({
+      await db.company.create({
         data: {
           name: 'My Company',
           nameAr: 'شركتي',
@@ -164,7 +109,7 @@ async function seedDefaultData() {
     }
 
     // Create default settings if none exist
-    const existingSettings = await prisma.settings.findFirst()
+    const existingSettings = await db.settings.findFirst()
     if (!existingSettings) {
       const settingsData = [
         { key: 'working_days', value: 'SUNDAY,MONDAY,TUESDAY,WEDNESDAY,THURSDAY', category: 'attendance' },
@@ -185,14 +130,14 @@ async function seedDefaultData() {
         { key: 'sync_interval_minutes', value: '30', category: 'fingerprint' },
       ]
       for (const setting of settingsData) {
-        await prisma.settings.create({ data: setting })
+        await db.settings.create({ data: setting })
       }
     }
 
     // Create default fingerprint license if none exists
-    const existingLicense = await prisma.license.findFirst({ where: { module: 'FINGERPRINT' } })
+    const existingLicense = await db.license.findFirst({ where: { module: 'FINGERPRINT' } })
     if (!existingLicense) {
-      await prisma.license.create({
+      await db.license.create({
         data: {
           key: 'FREE-FINGERPRINT-3',
           module: 'FINGERPRINT',
@@ -207,7 +152,7 @@ async function seedDefaultData() {
     }
 
     // Create audit log
-    await prisma.auditLog.create({
+    await db.auditLog.create({
       data: {
         userId: admin.id,
         action: 'SETUP',
@@ -227,6 +172,6 @@ async function seedDefaultData() {
       },
     }
   } finally {
-    await prisma.$disconnect()
+    // Don't disconnect - we're using a shared PrismaClient
   }
 }

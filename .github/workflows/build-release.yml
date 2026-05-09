@@ -9,7 +9,7 @@ on:
       version:
         description: 'Release version (e.g., 1.7.0)'
         required: true
-        default: '1.8.0'
+        default: '1.9.0'
 
 permissions:
   contents: write
@@ -230,16 +230,14 @@ jobs:
             - Payroll Module: `ATT-PAY-2025-PRO-001`
             - Fingerprint Pro: `ATT-FP-2025-PRO-010`
 
-            ## 🆕 What's New in v1.8.0
-            - ✅ Fixed 503 error on /api/setup when database tables don't exist
-            - ✅ Added /api/db-init endpoint for manual/auto database initialization
-            - ✅ Auto-initialization of database schema when tables are missing
-            - ✅ New "Database Setup Required" screen with one-click initialization
-            - ✅ Option to initialize with default admin (admin/admin123) or use setup wizard
-            - ✅ All API endpoints auto-detect and handle missing database tables
-            - ✅ Removed database files from git (auto-created on first run)
-            - ✅ Switched to async exec to prevent server hanging during DB init
-            - ✅ Improved error messages directing users to initialization options
+            ## 🆕 What's New in v1.9.0
+            - 🔧 **CRITICAL FIX**: Replaced `npx prisma db push` with raw SQL table creation
+            - ✅ No more "npx is not recognized" error on Windows
+            - ✅ Database tables are created using raw SQL (works without any CLI tools)
+            - ✅ Fresh install now works reliably: auto-creates DB file → creates tables → seeds admin
+            - ✅ All API endpoints (db-init, setup, auth) use raw SQL instead of npx
+            - ✅ Electron main.js no longer depends on prisma CLI at runtime
+            - ✅ Improved error handling and user feedback during DB initialization
 
             ---
             *Built with ❤️ by Attindo Team*
