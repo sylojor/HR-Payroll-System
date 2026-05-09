@@ -9,7 +9,7 @@ on:
       version:
         description: 'Release version (e.g., 1.7.0)'
         required: true
-        default: '1.9.0'
+        default: '1.10.0'
 
 permissions:
   contents: write
@@ -98,7 +98,7 @@ jobs:
           }
 
           # Check for critical modules
-          $criticalModules = @('next', 'react', 'react-dom', '@prisma', 'styled-jsx', 'prisma')
+          $criticalModules = @('next', 'react', 'react-dom', '@prisma', 'styled-jsx', 'better-sqlite3')
           foreach ($mod in $criticalModules) {
             $modPath = Join-Path $nextNm $mod
             if (Test-Path $modPath) {
@@ -108,12 +108,20 @@ jobs:
             }
           }
 
-          # Check prisma CLI
-          $prismaBuild = Join-Path $nextNm "prisma\build\index.js"
-          if (Test-Path $prismaBuild) {
-            Write-Host "✅ prisma CLI found"
+          # Check better-sqlite3 native module
+          $bsqliteNative = Get-ChildItem "$nextNm\better-sqlite3" -Recurse -Filter "*.node" -ErrorAction SilentlyContinue
+          if ($bsqliteNative) {
+            Write-Host "✅ better-sqlite3 native module found"
           } else {
-            Write-Host "❌ prisma CLI NOT found"
+            Write-Host "❌ better-sqlite3 native module NOT found"
+          }
+
+          # Check init-db.js script
+          $initDbPath = Join-Path $standaloneDir "scripts\init-db.js"
+          if (Test-Path $initDbPath) {
+            Write-Host "✅ scripts/init-db.js found"
+          } else {
+            Write-Host "❌ scripts/init-db.js NOT found"
           }
 
           # Check template database
@@ -230,14 +238,13 @@ jobs:
             - Payroll Module: `ATT-PAY-2025-PRO-001`
             - Fingerprint Pro: `ATT-FP-2025-PRO-010`
 
-            ## 🆕 What's New in v1.9.0
-            - 🔧 **CRITICAL FIX**: Replaced `npx prisma db push` with raw SQL table creation
-            - ✅ No more "npx is not recognized" error on Windows
-            - ✅ Database tables are created using raw SQL (works without any CLI tools)
-            - ✅ Fresh install now works reliably: auto-creates DB file → creates tables → seeds admin
-            - ✅ All API endpoints (db-init, setup, auth) use raw SQL instead of npx
-            - ✅ Electron main.js no longer depends on prisma CLI at runtime
-            - ✅ Improved error handling and user feedback during DB initialization
+            ## 🆕 What's New in v1.10.0
+            - 🔧 **CRITICAL FIX**: Fixed "Error code 14: Unable to open the database file"
+            - ✅ Now uses better-sqlite3 directly to create tables (bypasses Prisma URL parsing)
+            - ✅ Database is initialized BEFORE the server starts via init-db.js script
+            - ✅ Fixed DATABASE_URL format on Windows (file:///C:/... triple-slash)
+            - ✅ Three-layer initialization: template.db → init-db.js → API raw SQL fallback
+            - ✅ No more npx, no more Prisma URL parsing issues, no more Error code 14
 
             ---
             *Built with ❤️ by Attindo Team*

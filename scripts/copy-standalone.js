@@ -133,9 +133,22 @@ if (fs.existsSync(rootNm)) {
   }
 }
 
-// 6. Copy prisma CLI from project node_modules (not included in standalone trace)
-// We need this to run prisma db push at app startup
-console.log('\n📦 Copying prisma CLI for runtime db push...');
+// 6. Copy init-db.js script for database initialization at runtime
+console.log('\n📦 Copying init-db.js script...');
+const scriptsDest = path.join(standaloneDir, 'scripts');
+if (!fs.existsSync(scriptsDest)) fs.mkdirSync(scriptsDest, { recursive: true });
+const initDbSrc = path.join(cwd, 'scripts', 'init-db.js');
+if (fs.existsSync(initDbSrc)) {
+  fs.copyFileSync(initDbSrc, path.join(scriptsDest, 'init-db.js'));
+  console.log('  ✅ Copied scripts/init-db.js');
+} else {
+  console.log('  ⚠️ scripts/init-db.js not found');
+}
+
+// 7. Copy prisma CLI from project node_modules (not included in standalone trace)
+// Note: We no longer need prisma CLI for db push (using better-sqlite3 directly),
+// but keep it for potential future use
+console.log('\n📦 Copying prisma CLI (optional)...');
 const projectNm = path.join(cwd, 'node_modules');
 const prismaCliSrc = path.join(projectNm, 'prisma');
 const prismaCliDest = path.join(nextNm, 'prisma');

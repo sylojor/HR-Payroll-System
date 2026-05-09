@@ -23,7 +23,7 @@ function log(msg) {
 }
 
 log('=== Attindo Starting ===');
-log('Version: 1.9.0');
+log('Version: 1.10.0');
 log('Mode: ' + (isDev ? 'Development' : 'Production'));
 log('App Path: ' + app.getAppPath());
 log('Resources: ' + process.resourcesPath);
@@ -62,18 +62,24 @@ function getDatabaseUrl() {
 }
 
 /**
- * Initialize the database.
- * Strategy:
- * 1. If database file exists with content -> use it ✅
- * 2. Try to copy template.db from resources -> best option ✅
- * 3. Create empty database file -> Next.js API will create tables via raw SQL ✅
+ * Initialize the database using better-sqlite3 directly via init-db.js script.
+ * This runs BEFORE the Next.js server starts, ensuring all tables exist.
  *
- * NO MORE npx prisma db push! The Next.js API routes use raw SQL
- * to create tables, which works without any CLI tools.
+ * Strategy:
+ * 1. If database file exists with content -> verify it has tables ✅
+ * 2. Try to copy template.db from resources -> best option ✅
+ * 3. Run scripts/init-db.js with better-sqlite3 -> creates all tables ✅
+ *
+ * NO MORE npx prisma db push! NO MORE Prisma URL parsing issues!
  */
-function initializeDatabase() {
+async function initializeDatabase() {
   const dbPath = getDatabasePath();
   const dataDir = getAppDataDir();
+
+  // Ensure data directory exists
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
 
   // If database already exists and has content, check if it's valid
   if (fs.existsSync(dbPath)) {
@@ -110,23 +116,124 @@ function initializeDatabase() {
     }
   }
 
-  // No template database found - create empty file
-  // The Next.js API routes will create tables using raw SQL automatically
+  // No template database found - run init-db.js script to create tables
   log('⚠️ No template database found in resources');
-  log('Creating empty database file - tables will be created by the API...');
-  try {
-    // Make sure data directory exists
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
+  log('Running init-db.js to create database with all tables...');
+
+  return await runInitDbScript(dbPath);
+}
+
+/**
+ * Run the init-db.js script to create all database tables.
+ * Uses better-sqlite3 directly - no npx, no Prisma URL parsing, no Error code 14.
+ */
+function runInitDbScript(dbPath) {
+  return new Promise((resolve) => {
+    const standaloneDir = findStandaloneDir();
+    const nodeBinary = findNodeBinary();
+
+    // Find init-db.js script
+    const scriptPaths = [
+      path.join(process.resourcesPath, 'next-standalone', 'scripts', 'init-db.js'),
+      path.join(process.resourcesPath, 'app', 'next-standalone', 'scripts', 'init-db.js'),
+      path.join(__dirname, '..', 'scripts', 'init-db.js'),
+    ];
+
+    let scriptPath = null;
+    for (const sp of scriptPaths) {
+      if (fs.existsSync(sp)) {
+        scriptPath = sp;
+        log('Found init-db.js at: ' + sp);
+        break;
+      }
     }
-    fs.writeFileSync(dbPath, '');
-    log('Empty database file created: ' + dbPath + ' ✅');
-    log('Tables will be created automatically via API raw SQL when needed');
-    return true;
-  } catch (e) {
-    log('Failed to create database file: ' + e.message);
-    return false;
-  }
+
+    if (!scriptPath) {
+      log('⚠️ init-db.js not found, creating empty database file as fallback');
+      try {
+        fs.writeFileSync(dbPath, '');
+        log('Empty database file created: ' + dbPath);
+        resolve(true);
+      } catch (e) {
+        log('Failed to create database file: ' + e.message);
+        resolve(false);
+      }
+      return;
+    }
+
+    log('Running: node ' + scriptPath + ' ' + dbPath);
+
+    const env = {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
+    };
+
+    const proc = spawn(nodeBinary, [scriptPath, dbPath], {
+      env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let output = '';
+
+    proc.stdout.on('data', (data) => {
+      const text = data.toString();
+      output += text;
+      log('[init-db] ' + text.trim());
+    });
+
+    proc.stderr.on('data', (data) => {
+      const text = data.toString();
+      output += text;
+      log('[init-db stderr] ' + text.trim());
+    });
+
+    proc.on('error', (err) => {
+      log('init-db.js spawn error: ' + err.message);
+      // Fallback: create empty file
+      try {
+        fs.writeFileSync(dbPath, '');
+        log('Created empty database file as fallback');
+        resolve(true);
+      } catch (e) {
+        resolve(false);
+      }
+    });
+
+    proc.on('close', (code) => {
+      if (code === 0) {
+        log('✅ Database tables created successfully via init-db.js');
+        resolve(true);
+      } else {
+        log('⚠️ init-db.js exited with code ' + code);
+        // Even if it failed, the file might have been partially created
+        if (fs.existsSync(dbPath) && fs.statSync(dbPath).size > 0) {
+          log('Database file exists with content, continuing...');
+          resolve(true);
+        } else {
+          // Last resort: create empty file
+          try {
+            fs.writeFileSync(dbPath, '');
+            log('Created empty database file as last resort');
+            resolve(true);
+          } catch (e) {
+            resolve(false);
+          }
+        }
+      }
+    });
+
+    // Timeout after 15 seconds
+    setTimeout(() => {
+      log('init-db.js timeout, killing process');
+      proc.kill();
+      // If file exists, it might be partially created
+      if (fs.existsSync(dbPath)) {
+        resolve(true);
+      } else {
+        resolve(false);
+      }
+    }, 15000);
+  });
 }
 
 // NOTE: runPrismaDbPush() has been REMOVED.
@@ -601,7 +708,7 @@ function createSplashWindow() {
       <div class="title">Attindo</div>
       <div class="subtitle">HR & Payroll System</div>
       <div class="loader"><div class="loader-bar"></div></div>
-      <div class="version">v1.9.0</div>
+      <div class="version">v1.10.0</div>
     </body>
     </html>
   `;
@@ -646,7 +753,7 @@ function createMenu() {
             dialog.showMessageBox(mainWindow, {
               type: 'info', title: 'About Attindo',
               message: 'Attindo - HR & Payroll System',
-              detail: 'Version 1.9.0\n\nProfessional HR & Payroll Management System\n\nLog file: ' + logFile,
+              detail: 'Version 1.10.0\n\nProfessional HR & Payroll Management System\n\nLog file: ' + logFile,
             });
           },
         },
@@ -682,7 +789,7 @@ function createMenu() {
 }
 
 // ========== IPC ==========
-ipcMain.handle('get-app-version', () => '1.9.0');
+ipcMain.handle('get-app-version', () => '1.10.0');
 ipcMain.handle('get-database-path', () => getDatabasePath());
 ipcMain.handle('get-log-path', () => logFile);
 ipcMain.handle('show-open-dialog', async (e, opts) => dialog.showOpenDialog(mainWindow, opts));
@@ -716,9 +823,9 @@ app.whenReady().then(async () => {
       splash = createSplashWindow();
     }
 
-    // Step 1: Initialize database
+    // Step 1: Initialize database (now async - runs init-db.js)
     log('--- Step 1: Initialize Database ---');
-    const dbInitialized = initializeDatabase();
+    const dbInitialized = await initializeDatabase();
     log('Database initialization result: ' + (dbInitialized ? 'SUCCESS' : 'FALLBACK NEEDED'));
 
     // Step 2: Start Next.js server
