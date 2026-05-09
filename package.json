@@ -55,6 +55,10 @@
     ],
     "extraResources": [
       {
+        "from": "build/node.exe",
+        "to": "node/node.exe"
+      },
+      {
         "from": ".next/standalone",
         "to": "next-standalone",
         "filter": ["**/*"]

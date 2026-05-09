@@ -23,12 +23,13 @@ function log(msg) {
 }
 
 log('=== Attindo Starting ===');
-log('Version: 1.2.0');
+log('Version: 1.3.0');
 log('Mode: ' + (isDev ? 'Development' : 'Production'));
 log('App Path: ' + app.getAppPath());
 log('Resources: ' + process.resourcesPath);
 log('User Data: ' + app.getPath('userData'));
 log('Platform: ' + process.platform);
+log('Arch: ' + process.arch);
 
 // ========== DATABASE ==========
 function getAppDataDir() {
@@ -54,18 +55,42 @@ function ensureDatabase() {
 // Convert Windows path to proper file:// URI for Prisma
 function getDatabaseUrl() {
   const dbPath = getDatabasePath();
-  // On Windows, convert backslashes to forward slashes and ensure proper file:// format
   let normalizedPath = dbPath.replace(/\\/g, '/');
-  // Ensure absolute path starts with / on Windows (file:///C:/...)
   if (!normalizedPath.startsWith('/')) {
     normalizedPath = '/' + normalizedPath;
   }
   return 'file:' + normalizedPath;
 }
 
+// ========== FIND NODE.JS BINARY ==========
+function findNodeBinary() {
+  // Priority 1: Bundled Node.js binary (most reliable)
+  const possibleBundledPaths = [
+    path.join(process.resourcesPath, 'node', 'node.exe'),
+    path.join(process.resourcesPath, 'node', 'node'),
+    path.join(process.resourcesPath, 'app', 'node', 'node.exe'),
+    path.join(process.resourcesPath, 'app', 'node', 'node'),
+  ];
+
+  for (const p of possibleBundledPaths) {
+    if (fs.existsSync(p)) {
+      log('Found bundled Node.js: ' + p);
+      return p;
+    }
+  }
+
+  // Priority 2: System Node.js
+  const sysNodePaths = [
+    'node', // Try PATH
+    process.execPath, // Electron binary (with ELECTRON_RUN_AS_NODE)
+  ];
+
+  log('No bundled Node.js found, will use Electron as Node.js fallback');
+  return process.execPath;
+}
+
 // ========== STANDALONE SERVER SETUP ==========
 function findServerPath() {
-  // Possible locations for the Next.js standalone server
   const possiblePaths = [
     path.join(process.resourcesPath, 'next-standalone', 'server.js'),
     path.join(process.resourcesPath, 'app', 'next-standalone', 'server.js'),
@@ -94,6 +119,25 @@ function findStandaloneDir() {
   return null;
 }
 
+// List directory contents recursively for diagnostics
+function listDir(dir, depth = 0, maxDepth = 2) {
+  if (depth > maxDepth) return '';
+  let result = '';
+  try {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const indent = '  '.repeat(depth);
+      result += `${indent}${entry.name}${entry.isDirectory() ? '/' : ''}\n`;
+      if (entry.isDirectory() && depth < maxDepth) {
+        result += listDir(path.join(dir, entry.name), depth + 1, maxDepth);
+      }
+    }
+  } catch (e) {
+    result += `  [Error reading: ${e.message}]\n`;
+  }
+  return result;
+}
+
 // ========== NEXT.JS SERVER ==========
 function startNextServer() {
   return new Promise((resolve, reject) => {
@@ -108,7 +152,6 @@ function startNextServer() {
 
     if (!serverPath || !standaloneDir) {
       log('ERROR: Could not find Next.js standalone server!');
-      log('Searched paths:');
       log('  serverPath: ' + serverPath);
       log('  standaloneDir: ' + standaloneDir);
       reject(new Error('Next.js server not found'));
@@ -120,36 +163,74 @@ function startNextServer() {
 
     // List standalone dir contents for debugging
     try {
-      const contents = fs.readdirSync(standaloneDir);
-      log('Standalone contents: ' + contents.join(', '));
+      log('Standalone top-level contents:\n' + listDir(standaloneDir, 0, 1));
     } catch (e) {
       log('Cannot read standalone dir: ' + e.message);
+    }
+
+    // Check if node_modules exists and has 'next'
+    const nodeModulesDir = path.join(standaloneDir, 'node_modules');
+    const nextModuleDir = path.join(nodeModulesDir, 'next');
+    log('node_modules exists: ' + fs.existsSync(nodeModulesDir));
+    log('next module exists: ' + fs.existsSync(nextModuleDir));
+
+    if (fs.existsSync(nodeModulesDir)) {
+      try {
+        const nmContents = fs.readdirSync(nodeModulesDir);
+        log('node_modules contains ' + nmContents.length + ' entries');
+        log('  First 30: ' + nmContents.slice(0, 30).join(', '));
+      } catch (e) {
+        log('Cannot read node_modules: ' + e.message);
+      }
+    }
+
+    // Check alternative node_modules locations
+    const altNodeModules = [
+      path.join(process.resourcesPath, 'node_modules'),
+      path.join(process.resourcesPath, 'app', 'node_modules'),
+      path.join(path.dirname(serverPath), '..', 'node_modules'),
+    ];
+    for (const alt of altNodeModules) {
+      const altNext = path.join(alt, 'next');
+      if (fs.existsSync(altNext)) {
+        log('Found next module at alternative location: ' + altNext);
+      }
     }
 
     const dbUrl = getDatabaseUrl();
     log('Database URL: ' + dbUrl);
 
-    const env = {
+    // Find Node.js binary
+    const nodeBinary = findNodeBinary();
+    const usingElectronAsNode = (nodeBinary === process.execPath);
+    log('Node binary: ' + nodeBinary);
+    log('Using Electron as Node: ' + usingElectronAsNode);
+
+    // Build environment for the server process
+    const serverEnv = {
       ...process.env,
       DATABASE_URL: dbUrl,
       PORT: String(nextPort),
       HOSTNAME: '0.0.0.0',
       NODE_ENV: 'production',
+      // NODE_PATH helps Node.js find modules if they're in an unexpected location
+      NODE_PATH: nodeModulesDir,
     };
 
-    // CRITICAL: Use process.execPath (Electron binary) instead of 'node'
-    // because 'node' is not in PATH on user's Windows machine.
-    // ELECTRON_RUN_AS_NODE=1 makes Electron behave as plain Node.js.
-    const nodePath = process.execPath;
-    log('Node path (process.execPath): ' + nodePath);
-    log('Starting server with env PORT=' + nextPort + ' HOSTNAME=0.0.0.0 ELECTRON_RUN_AS_NODE=1');
+    // If using Electron as Node.js, set the flag
+    if (usingElectronAsNode) {
+      serverEnv.ELECTRON_RUN_AS_NODE = '1';
+    }
+
+    log('Starting server with env PORT=' + nextPort + ' HOSTNAME=0.0.0.0');
+    log('NODE_PATH=' + nodeModulesDir);
+    if (usingElectronAsNode) {
+      log('ELECTRON_RUN_AS_NODE=1');
+    }
 
     try {
-      nextServer = spawn(nodePath, [serverPath], {
-        env: {
-          ...env,
-          ELECTRON_RUN_AS_NODE: '1',
-        },
+      nextServer = spawn(nodeBinary, [serverPath], {
+        env: serverEnv,
         cwd: standaloneDir,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
@@ -161,7 +242,7 @@ function startNextServer() {
         log('[Next.js stdout] ' + output.trim());
 
         // Detect when server is ready
-        if (!serverStarted && (output.includes('Ready') || output.includes('started') || output.includes('Listening'))) {
+        if (!serverStarted && (output.includes('Ready') || output.includes('started') || output.includes('Listening') || output.includes('Local:'))) {
           serverStarted = true;
           resolve(nextPort);
         }
@@ -174,7 +255,9 @@ function startNextServer() {
 
       nextServer.on('error', (err) => {
         log('[Next.js spawn error] ' + err.message);
-        reject(err);
+        if (!serverStarted) {
+          reject(err);
+        }
       });
 
       nextServer.on('close', (code, signal) => {
@@ -240,73 +323,6 @@ function waitForServer(port, maxRetries = 40) {
 }
 
 // ========== SEED DATABASE ==========
-function seedDatabase() {
-  return new Promise((resolve) => {
-    const dbPath = getDatabasePath();
-
-    try {
-      const dbSize = fs.statSync(dbPath).size;
-      if (dbSize > 10000) {
-        log('Database already has data (' + dbSize + ' bytes), skipping seed');
-        resolve();
-        return;
-      }
-    } catch (e) {
-      log('Cannot check database size: ' + e.message);
-    }
-
-    log('First run detected, seeding database...');
-
-    // Find seed script
-    const possibleSeedPaths = isDev
-      ? [path.join(process.cwd(), 'scripts', 'seed.ts')]
-      : [
-          path.join(process.resourcesPath, 'next-standalone', 'scripts', 'seed.ts'),
-          path.join(process.resourcesPath, 'scripts', 'seed.ts'),
-        ];
-
-    let seedPath = null;
-    for (const p of possibleSeedPaths) {
-      if (fs.existsSync(p)) {
-        seedPath = p;
-        log('Found seed script at: ' + p);
-        break;
-      }
-    }
-
-    if (!seedPath) {
-      log('Seed script not found, will rely on API seed endpoint');
-      // Try to seed via HTTP after server starts
-      resolve();
-      return;
-    }
-
-    const dbUrl = getDatabaseUrl();
-    const env = {
-      ...process.env,
-      DATABASE_URL: dbUrl,
-    };
-
-    const child = spawn('npx', ['tsx', seedPath], {
-      env,
-      shell: true,
-      stdio: 'pipe',
-      cwd: path.dirname(seedPath),
-    });
-
-    child.stdout.on('data', (data) => { log('[Seed] ' + data.toString().trim()); });
-    child.stderr.on('data', (data) => { log('[Seed err] ' + data.toString().trim()); });
-
-    child.on('close', (code) => {
-      log('Seed completed with code ' + code);
-      resolve();
-    });
-
-    setTimeout(() => { child.kill(); resolve(); }, 30000);
-  });
-}
-
-// Seed via API endpoint after server is running
 async function seedViaApi() {
   try {
     const res = await fetch(`http://localhost:${nextPort}/api/seed`, { method: 'POST' });
@@ -518,7 +534,7 @@ function createSplashWindow() {
       <div class="title">Attindo</div>
       <div class="subtitle">HR & Payroll System</div>
       <div class="loader"><div class="loader-bar"></div></div>
-      <div class="version">v1.0.0</div>
+      <div class="version">v1.3.0</div>
     </body>
     </html>
   `;
@@ -570,7 +586,7 @@ function createMenu() {
               type: 'info',
               title: 'About Attindo',
               message: 'Attindo - HR & Payroll System',
-              detail: 'Version 1.0.0\n\nProfessional HR & Payroll Management System\n\nLog file: ' + logFile,
+              detail: 'Version 1.3.0\n\nProfessional HR & Payroll Management System\n\nLog file: ' + logFile,
             });
           },
         },
@@ -686,11 +702,9 @@ app.whenReady().then(async () => {
     createMenu();
 
     if (serverReady) {
-      // Load the actual Next.js app
       log('Loading http://localhost:' + nextPort);
       mainWindow.loadURL(`http://localhost:${nextPort}`);
     } else {
-      // Show error page with retry option
       log('Showing error page - server not ready');
       showErrorPage(mainWindow, 'The application server failed to start.\n\nPlease check the log file for details.\n\nLog: ' + logFile);
     }
@@ -708,20 +722,16 @@ app.whenReady().then(async () => {
     log('Fatal error: ' + error.message + '\n' + error.stack);
     if (splash) splash.close();
 
-    // Show error in a dialog
     dialog.showErrorBox(
       'Attindo - Startup Error',
       `Failed to start: ${error.message}\n\nLog file: ${logFile}`
     );
 
-    // Try to create window with error page anyway
     if (!mainWindow) {
       createWindow();
       createMenu();
       showErrorPage(mainWindow, error.message + '\n\nStack: ' + error.stack);
     }
-
-    // Don't quit - let user see the error and retry
   }
 });
 

@@ -43,6 +43,17 @@ function copyModule(name) {
   }
 }
 
+// Ensure a module exists in standalone, copy from project if missing
+function ensureModule(name) {
+  const dest = path.join(process.cwd(), '.next', 'standalone', 'node_modules', name);
+  if (!fs.existsSync(dest)) {
+    console.log(`📦 Module ${name} missing in standalone, copying from project`);
+    copyModule(name);
+  } else {
+    console.log(`✅ Module ${name} already exists in standalone`);
+  }
+}
+
 console.log('🔄 Copying standalone build files...');
 
 const cwd = process.cwd();
@@ -98,13 +109,51 @@ for (const mod of nativeModules) {
   copyModule(mod);
 }
 
-// 8. Verify key files
+// 8. CRITICAL: Ensure the 'next' module exists in standalone
+// This is the most common failure point - if Next.js standalone build
+// didn't properly trace the next module, we copy it explicitly.
+console.log('\n🔍 Ensuring critical server modules exist...');
+const criticalModules = [
+  'next',
+  // Next.js server dependencies
+  'caniuse-lite',
+  'postcss',
+  'tailwindcss',
+  'react',
+  'react-dom',
+  // These might already be in standalone but ensure they're there
+  'sharp',
+  'semver',
+  'undici',
+  'busboy',
+  'styled-jsx',
+];
+
+for (const mod of criticalModules) {
+  ensureModule(mod);
+}
+
+// Also ensure @next namespace modules
+const nextNsDir = path.join(cwd, 'node_modules', '@next');
+if (fs.existsSync(nextNsDir)) {
+  try {
+    const nextNamespaced = fs.readdirSync(nextNsDir);
+    for (const sub of nextNamespaced) {
+      ensureModule('@next/' + sub);
+    }
+  } catch (e) {
+    console.warn('⚠️ Cannot read @next directory: ' + e.message);
+  }
+}
+
+// 9. Verify key files
 const keyFiles = [
   '.next/standalone/server.js',
   '.next/standalone/.next/static',
   '.next/standalone/public',
   '.next/standalone/prisma/schema.prisma',
   '.next/standalone/node_modules/.prisma',
+  '.next/standalone/node_modules/next',
 ];
 
 console.log('\n🔍 Verifying build...');
@@ -126,7 +175,26 @@ if (fs.existsSync(nmDir)) {
     return fs.statSync(path.join(nmDir, d)).isDirectory();
   });
   console.log(`\n📦 standalone/node_modules contains ${dirs.length} packages`);
-  console.log('  First 20: ' + dirs.slice(0, 20).join(', '));
+  console.log('  First 30: ' + dirs.slice(0, 30).join(', '));
+
+  // Check if next module has its key files
+  const nextDir = path.join(nmDir, 'next');
+  if (fs.existsSync(nextDir)) {
+    const nextPkg = path.join(nextDir, 'package.json');
+    if (fs.existsSync(nextPkg)) {
+      const pkg = JSON.parse(fs.readFileSync(nextPkg, 'utf-8'));
+      console.log(`  next module version: ${pkg.version}`);
+    }
+    const nextServerDir = path.join(nextDir, 'dist', 'server');
+    if (fs.existsSync(nextServerDir)) {
+      console.log('  ✅ next/dist/server exists');
+    } else {
+      console.log('  ❌ next/dist/server MISSING - next module is incomplete!');
+    }
+  }
+} else {
+  console.log('\n❌ standalone/node_modules DOES NOT EXIST - this is a critical issue!');
+  allGood = false;
 }
 
 if (allGood) {
