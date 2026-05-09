@@ -85,3 +85,26 @@ Stage Summary:
 - Release will be available at https://github.com/sylojor/HR-Payroll-System/releases
 - App includes splash screen, auto database init, auto seeding on first run
 - NSIS installer with custom welcome page, desktop shortcut, start menu shortcut
+
+---
+Task ID: 5
+Agent: Main
+Task: Fix Electron app startup failures (spawn node ENOENT + Cannot find module 'next')
+
+Work Log:
+- Analyzed user logs: v1.0.0 had `spawn node ENOENT` (node not in PATH), v1.2.0 had `Cannot find module 'next'` (node_modules missing from packaged resources)
+- Root cause: Next.js standalone server requires `node_modules/next` which was missing from the packaged Electron app
+- Secondary cause: `spawn('node', ...)` fails because Node.js isn't installed on user's machine
+- Fix 1: Bundle a real Node.js binary (node.exe) with the app as extraResources
+- Fix 2: Switch CI from `bun install` to `npm ci` for reliable node_modules structure (Bun's symlink-based modules confuse Next.js standalone tracer)
+- Fix 3: Add fallback module copying in copy-standalone.js (ensures 'next' and critical deps are always included)
+- Fix 4: Add NODE_PATH environment variable in electron/main.js to help module resolution
+- Fix 5: Add serverExternalPackages to next.config.ts for better standalone tracing
+- Fix 6: Add comprehensive verification steps in CI workflow
+- Fix 7: Better diagnostics in electron/main.js (list node_modules, check module existence)
+- Created and pushed v1.3.0 tag, GitHub Actions build is running
+
+Stage Summary:
+- v1.3.0 release building at https://github.com/sylojor/HR-Payroll-System/releases
+- Key changes: bundled Node.js binary, npm instead of bun for CI, fallback module copying, NODE_PATH support
+- These fixes address both the ENOENT and MODULE_NOT_FOUND errors

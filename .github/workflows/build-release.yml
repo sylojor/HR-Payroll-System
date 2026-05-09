@@ -36,7 +36,7 @@ jobs:
         run: |
           # Use npm for reliable node_modules structure (Bun's symlink-based structure
           # can cause issues with Next.js standalone build module tracing)
-          npm ci --legacy-peer-deps
+          npm install --legacy-peer-deps
         env:
           NODE_ENV: development
 
