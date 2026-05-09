@@ -39,54 +39,30 @@ jobs:
         run: bun run db:generate
 
       - name: Build Next.js
-        run: bun run build
+        run: npx next build
+        env:
+          DATABASE_URL: "file:./db/attindo.db"
 
-      - name: Copy static files to standalone
+      - name: Copy standalone files
+        run: node scripts/copy-standalone.js
+
+      - name: Verify standalone build
         shell: pwsh
         run: |
-          Copy-Item -Path ".next\static" -Destination ".next\standalone\.next\static" -Recurse -Force
-          Copy-Item -Path "public" -Destination ".next\standalone\public" -Recurse -Force
-
-      - name: Copy Prisma and node_modules to standalone
-        shell: pwsh
-        run: |
-          # Copy prisma schema
-          Copy-Item -Path "prisma" -Destination ".next\standalone\prisma" -Recurse -Force
-          
-          # Create node_modules directories
-          $nmDir = ".next\standalone\node_modules"
-          if (-not (Test-Path $nmDir)) { New-Item -ItemType Directory -Path $nmDir -Force }
-          
-          # Copy .prisma client
-          if (Test-Path "node_modules\.prisma") {
-            Copy-Item -Path "node_modules\.prisma" -Destination "$nmDir\.prisma" -Recurse -Force
+          Write-Host "Standalone directory structure:"
+          if (Test-Path ".next\standalone") {
+            Get-ChildItem ".next\standalone" -Depth 1 | ForEach-Object { Write-Host "  $($_.FullName)" }
+          } else {
+            Write-Error "Standalone directory not found!"
           }
-          
-          # Copy @prisma packages
-          if (Test-Path "node_modules\@prisma") {
-            Copy-Item -Path "node_modules\@prisma" -Destination "$nmDir\@prisma" -Recurse -Force
+          if (Test-Path ".next\standalone\server.js") {
+            Write-Host "✅ server.js found"
+          } else {
+            Write-Error "server.js not found in standalone!"
           }
-          
-          # Copy better-sqlite3 native module
-          if (Test-Path "node_modules\better-sqlite3") {
-            Copy-Item -Path "node_modules\better-sqlite3" -Destination "$nmDir\better-sqlite3" -Recurse -Force
-          }
-          
-          # Copy binding file
-          if (Test-Path "node_modules\binding") {
-            Copy-Item -Path "node_modules\binding" -Destination "$nmDir\binding" -Recurse -Force
-          }
-          
-          # Copy file-uri-to-path
-          if (Test-Path "node_modules\file-uri-to-path") {
-            Copy-Item -Path "node_modules\file-uri-to-path" -Destination "$nmDir\file-uri-to-path" -Recurse -Force
-          }
-
-          Write-Host "Files copied successfully"
-          Get-ChildItem ".next\standalone\node_modules" -Directory | ForEach-Object { Write-Host "  $($_.Name)" }
 
       - name: Build Electron App (Windows)
-        run: npx electron-builder --win --publish never
+        run: npx electron-builder --win --config electron-builder.yml --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -99,6 +75,15 @@ jobs:
           else
             echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
           fi
+
+      - name: List release files
+        shell: pwsh
+        run: |
+          if (Test-Path "release") {
+            Get-ChildItem "release" -Recurse | ForEach-Object { Write-Host "  $($_.FullName) - $([math]::Round($_.Length / 1MB, 2)) MB" }
+          } else {
+            Write-Host "No release directory found"
+          }
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
