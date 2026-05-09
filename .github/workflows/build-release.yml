@@ -40,7 +40,7 @@ jobs:
         env:
           DATABASE_URL: "file:./db/attindo.db"
 
-      - name: Copy standalone files (optimized)
+      - name: Copy standalone files & merge node_modules
         run: node scripts/copy-standalone.js
 
       - name: Verify standalone build
@@ -49,32 +49,44 @@ jobs:
           Write-Host "=== Verifying standalone build ==="
 
           $standaloneDir = ".next\standalone"
-          $nodeModulesDir = "$standaloneDir\node_modules"
-          $nextModuleDir = "$nodeModulesDir\next"
+          $nextNm = "$standaloneDir\.next\node_modules"
 
-          if (Test-Path $nextModuleDir) {
-            Write-Host "✅ next module found in standalone"
-            $nextPkg = Get-Content "$nextModuleDir\package.json" | ConvertFrom-Json
-            Write-Host "   Version: $($nextPkg.version)"
+          # Check .next/node_modules (this is where ALL modules should be after merge)
+          if (Test-Path $nextNm) {
+            $entries = Get-ChildItem $nextNm -Directory
+            Write-Host "✅ .next/node_modules has $($entries.Count) packages"
+            
+            # List all packages for debugging
+            $entries | ForEach-Object { Write-Host "  - $($_.Name)" }
           } else {
-            Write-Host "❌ next module NOT found in standalone!"
-            Write-Host "   Attempting to copy from project node_modules..."
-            Copy-Item -Path "node_modules\next" -Destination $nextModuleDir -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "❌ .next/node_modules DOES NOT EXIST!"
           }
 
-          # Check for next/dist/server
-          if (Test-Path "$nextModuleDir\dist\server") {
+          # Check for critical modules in .next/node_modules
+          $criticalModules = @('next', 'react', 'react-dom', '@prisma', 'styled-jsx')
+          foreach ($mod in $criticalModules) {
+            $modPath = Join-Path $nextNm $mod
+            if (Test-Path $modPath) {
+              Write-Host "✅ $mod found in .next/node_modules"
+            } else {
+              Write-Host "❌ $mod NOT found in .next/node_modules"
+            }
+          }
+
+          # Check that next/dist/server exists
+          $nextServerDir = Join-Path $nextNm "next\dist\server"
+          if (Test-Path $nextServerDir) {
             Write-Host "✅ next/dist/server exists"
           } else {
             Write-Host "❌ next/dist/server MISSING"
           }
 
-          # Check node_modules count
-          if (Test-Path $nodeModulesDir) {
-            $count = (Get-ChildItem $nodeModulesDir -Directory).Count
-            Write-Host "📦 standalone/node_modules has $count packages"
+          # Check for root node_modules (should NOT exist after merge)
+          $rootNm = "$standaloneDir\node_modules"
+          if (Test-Path $rootNm) {
+            Write-Host "⚠️ Root node_modules still exists (will be pruned by electron-builder)"
           } else {
-            Write-Host "❌ standalone/node_modules DOES NOT EXIST!"
+            Write-Host "✅ Root node_modules removed (all modules in .next/node_modules)"
           }
 
           # Report standalone size

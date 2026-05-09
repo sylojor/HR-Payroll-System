@@ -23,7 +23,7 @@ function log(msg) {
 }
 
 log('=== Attindo Starting ===');
-log('Version: 1.3.2');
+log('Version: 1.4.0');
 log('Mode: ' + (isDev ? 'Development' : 'Production'));
 log('App Path: ' + app.getAppPath());
 log('Resources: ' + process.resourcesPath);
@@ -111,62 +111,60 @@ function findStandaloneDir() {
   return null;
 }
 
-// ========== FIND ALL NODE_MODULES PATHS ==========
-// Next.js standalone build puts modules in different locations:
-// 1. standalone/node_modules/ (sometimes, but electron-builder may prune this)
-// 2. standalone/.next/node_modules/ (where Next.js traces server deps)
-// 3. standalone/_deps/ (our extra modules that won't be pruned)
-function findNodeModulesPaths(standaloneDir) {
-  const paths = [];
-  
-  // 1. Root-level node_modules (may be pruned by electron-builder)
+// ========== ENSURE NODE_MODULES IS ACCESSIBLE ==========
+// The standalone build puts all modules in .next/node_modules/
+// We need to make sure require('next') can find them.
+// Strategy: Create a node_modules junction/symlink at standalone root
+// pointing to .next/node_modules so server.js can resolve modules.
+function ensureNodeModulesAccessible(standaloneDir) {
   const rootNm = path.join(standaloneDir, 'node_modules');
+  const nextNm = path.join(standaloneDir, '.next', 'node_modules');
+
+  // Check if root node_modules already exists and has 'next'
   if (fs.existsSync(rootNm)) {
-    paths.push(rootNm);
-    log('Found root node_modules: ' + rootNm);
-  } else {
-    log('Root node_modules NOT found');
+    const nextMod = path.join(rootNm, 'next');
+    if (fs.existsSync(nextMod)) {
+      log('Root node_modules exists with next module ✅');
+      return rootNm;
+    }
   }
 
-  // 2. .next/node_modules (Next.js traced server dependencies - THIS IS THE KEY ONE)
-  const nextNm = path.join(standaloneDir, '.next', 'node_modules');
+  log('Root node_modules missing or incomplete');
+
+  // Check if .next/node_modules exists with 'next'
   if (fs.existsSync(nextNm)) {
-    paths.push(nextNm);
-    log('Found .next/node_modules: ' + nextNm);
-    // Check if 'next' module exists here
     const nextMod = path.join(nextNm, 'next');
     if (fs.existsSync(nextMod)) {
-      log('  ✅ next module found in .next/node_modules');
+      log('Found .next/node_modules with next module ✅');
+      
+      // Create a junction from root node_modules -> .next/node_modules
+      // This way server.js can resolve require('next') normally
+      try {
+        // Remove any existing broken node_modules
+        if (fs.existsSync(rootNm)) {
+          fs.rmSync(rootNm, { recursive: true, force: true });
+        }
+        // On Windows, use junction (doesn't require admin privileges)
+        fs.symlinkSync(nextNm, rootNm, 'junction');
+        log('Created node_modules junction -> .next/node_modules ✅');
+        return rootNm;
+      } catch (symlinkErr) {
+        log('Failed to create junction: ' + symlinkErr.message);
+        log('Will use NODE_PATH fallback instead');
+        return nextNm;
+      }
+    } else {
+      log('.next/node_modules exists but next module NOT found!');
+      try {
+        const entries = fs.readdirSync(nextNm);
+        log('  .next/node_modules has ' + entries.length + ' entries: ' + entries.slice(0, 20).join(', '));
+      } catch (e) {}
     }
-    // Check for @prisma
-    const prismaMod = path.join(nextNm, '@prisma');
-    if (fs.existsSync(prismaMod)) {
-      log('  ✅ @prisma found in .next/node_modules');
-    }
-    // Check for better-sqlite3
-    const bsqlite = path.join(nextNm, 'better-sqlite3');
-    if (fs.existsSync(bsqlite)) {
-      log('  ✅ better-sqlite3 found in .next/node_modules');
-    }
-    // List first 20 entries
-    try {
-      const entries = fs.readdirSync(nextNm);
-      log('  .next/node_modules has ' + entries.length + ' entries: ' + entries.slice(0, 20).join(', '));
-    } catch (e) {}
   } else {
-    log('.next/node_modules NOT found');
+    log('.next/node_modules NOT found!');
   }
 
-  // 3. _deps directory (fallback for extra modules)
-  const depsNm = path.join(standaloneDir, '_deps');
-  if (fs.existsSync(depsNm)) {
-    paths.push(depsNm);
-    log('Found _deps: ' + depsNm);
-  } else {
-    log('_deps directory NOT found (not needed if .next/node_modules has everything)');
-  }
-
-  return paths;
+  return null;
 }
 
 // ========== NEXT.JS SERVER ==========
@@ -192,8 +190,8 @@ function startNextServer() {
     log('Server path: ' + serverPath);
     log('Standalone dir: ' + standaloneDir);
 
-    // Find ALL possible node_modules locations
-    const nodeModulesPaths = findNodeModulesPaths(standaloneDir);
+    // Ensure node_modules is accessible for require('next')
+    const nodeModulesPath = ensureNodeModulesAccessible(standaloneDir);
 
     const dbUrl = getDatabaseUrl();
     log('Database URL: ' + dbUrl);
@@ -204,9 +202,18 @@ function startNextServer() {
     log('Node binary: ' + nodeBinary);
     log('Using Electron as Node: ' + usingElectronAsNode);
 
-    // Build NODE_PATH with ALL module locations
-    // This is the key fix: include .next/node_modules/ where Next.js actually puts its deps
-    const nodePathValue = nodeModulesPaths.join(path.delimiter);
+    // Build NODE_PATH - include .next/node_modules as fallback
+    // even if we created a junction, NODE_PATH helps with nested requires
+    const nodePathParts = [];
+    if (nodeModulesPath) {
+      nodePathParts.push(nodeModulesPath);
+    }
+    // Always add .next/node_modules as fallback
+    const nextNm = path.join(standaloneDir, '.next', 'node_modules');
+    if (fs.existsSync(nextNm) && !nodePathParts.includes(nextNm)) {
+      nodePathParts.push(nextNm);
+    }
+    const nodePathValue = nodePathParts.join(path.delimiter);
     log('NODE_PATH will be: ' + nodePathValue);
 
     // Build environment for the server process
@@ -477,7 +484,7 @@ function createSplashWindow() {
       <div class="title">Attindo</div>
       <div class="subtitle">HR & Payroll System</div>
       <div class="loader"><div class="loader-bar"></div></div>
-      <div class="version">v1.3.2</div>
+      <div class="version">v1.4.0</div>
     </body>
     </html>
   `;
@@ -522,7 +529,7 @@ function createMenu() {
             dialog.showMessageBox(mainWindow, {
               type: 'info', title: 'About Attindo',
               message: 'Attindo - HR & Payroll System',
-              detail: 'Version 1.3.2\n\nProfessional HR & Payroll Management System\n\nLog file: ' + logFile,
+              detail: 'Version 1.4.0\n\nProfessional HR & Payroll Management System\n\nLog file: ' + logFile,
             });
           },
         },
