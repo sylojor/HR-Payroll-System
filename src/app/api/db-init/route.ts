@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { createAllTables, ensureDatabaseFile } from '@/lib/db-schema'
+import { createAllTables, ensureDatabaseFile, getDbFilePath } from '@/lib/db-schema'
 
 export async function POST(request: NextRequest) {
   try {
@@ -9,7 +9,9 @@ export async function POST(request: NextRequest) {
     const seedOnly = body.seedOnly === true
 
     // Step 1: Ensure database file exists
-    ensureDatabaseFile()
+    const dbPath = ensureDatabaseFile()
+    console.log('[db-init] Database path:', dbPath || 'UNKNOWN')
+    console.log('[db-init] DATABASE_URL:', process.env.DATABASE_URL || 'NOT SET')
 
     if (seedOnly) {
       // Just seed data, don't create tables
@@ -29,8 +31,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Step 2: Create all tables using raw SQL (no npx needed!)
-    const createResult = await createAllTables(db)
+    // Step 2: Create all tables using better-sqlite3 directly (bypasses Prisma!)
+    const createResult = await createAllTables()
     if (!createResult.success) {
       return NextResponse.json(
         { error: 'Failed to initialize database schema: ' + (createResult.error || 'Unknown error') },
@@ -45,6 +47,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
           success: true,
           message: 'Database initialized with default admin user',
+          dbPath: createResult.dbPath,
           ...seedResult,
         })
       } catch (seedError) {
@@ -60,6 +63,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       message: 'Database schema initialized successfully',
+      dbPath: createResult.dbPath,
     })
   } catch (error) {
     console.error('[db-init] Error:', error)

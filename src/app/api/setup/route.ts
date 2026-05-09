@@ -3,22 +3,20 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAllTables, ensureDatabaseFile } from '@/lib/db-schema'
 
 /**
- * Try to ensure database schema exists by creating tables using raw SQL.
- * No dependency on npx or prisma CLI - works in Electron production builds.
+ * Try to ensure database schema exists by creating tables directly with better-sqlite3.
+ * No dependency on npx, prisma CLI, or Prisma URL parsing!
  */
 async function ensureDatabaseSchema(): Promise<boolean> {
   try {
-    // First, ensure the database file exists
-    ensureDatabaseFile()
-
-    // Try a simple query to see if tables exist
+    // First, try a simple Prisma query to see if tables exist
     await db.user.count()
     return true
   } catch {
-    // Tables don't exist - create them using raw SQL
+    // Tables don't exist - create them using better-sqlite3 directly
     try {
-      console.log('[setup] Database tables not found, creating via raw SQL...')
-      const result = await createAllTables(db)
+      console.log('[setup] Database tables not found, creating via better-sqlite3...')
+      ensureDatabaseFile()
+      const result = await createAllTables()
       if (result.success) {
         console.log('[setup] Database tables created successfully')
         return true

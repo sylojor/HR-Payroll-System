@@ -28,12 +28,12 @@ export async function POST(request: NextRequest) {
       console.error('Database error during login:', dbError)
       const msg = dbError instanceof Error ? dbError.message : ''
 
-      // If tables don't exist, try to auto-initialize using raw SQL
+      // If tables don't exist, try to auto-initialize using better-sqlite3
       if (msg.includes('does not exist') || msg.includes('no such table') || msg.includes('Error code 14')) {
         try {
-          console.log('[auth] Auto-initializing database via raw SQL...')
+          console.log('[auth] Auto-initializing database via better-sqlite3...')
           ensureDatabaseFile()
-          const result = await createAllTables(db)
+          const result = await createAllTables()
           if (result.success) {
             // Retry the query after initialization
             user = await db.user.findUnique({ where: { username } })

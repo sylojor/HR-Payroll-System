@@ -1,91 +1,45 @@
 /**
- * Database Schema Initialization Utility
+ * Database Initialization Script
  *
- * Creates all database tables using better-sqlite3 DIRECTLY.
- * This bypasses Prisma's DATABASE_URL parsing which causes
- * "Error code 14: Unable to open the database file" on Windows.
+ * This script creates all database tables using better-sqlite3 directly.
+ * It's designed to be run by the Electron main.js BEFORE starting the Next.js server.
  *
- * How it works:
- * 1. Compute the database file path from DATABASE_URL (or use a default)
- * 2. Ensure the directory and file exist
- * 3. Open the database directly with better-sqlite3
- * 4. Create all tables using CREATE TABLE IF NOT EXISTS
- * 5. Close the database
- * 6. Now Prisma can connect to the valid database file
+ * Usage: node scripts/init-db.js <databaseFilePath>
+ *
+ * This avoids all the issues with:
+ * - "npx is not recognized" (no npx needed)
+ * - "Error code 14" (no Prisma URL parsing, direct file path)
+ * - CLI tools not available in production build
  */
 
-import { existsSync, mkdirSync, writeFileSync } from 'fs'
-import path from 'path'
+const Database = require('better-sqlite3');
+const fs = require('fs');
+const path = require('path');
 
-/**
- * Extract the filesystem path from DATABASE_URL env variable.
- * Handles all common SQLite URL formats on both Windows and Unix.
- */
-export function getDbFilePath(): string | null {
-  const dbUrl = process.env.DATABASE_URL || ''
-  if (!dbUrl.startsWith('file:')) return null
+const dbPath = process.argv[2];
 
-  let filePath = dbUrl.replace(/^file:/, '')
-
-  // Handle file:///path (three slashes = absolute path)
-  if (filePath.startsWith('///')) {
-    filePath = filePath.slice(2) // file:////path -> file:///path was already stripped, now /path
-    // On Windows, file:///C:/path -> /C:/path after this -> need to strip leading /
-    if (process.platform === 'win32' && filePath.match(/^\/[A-Za-z]:\//)) {
-      filePath = filePath.slice(1) // /C:/path -> C:/path
-    }
-  }
-  // Handle file://path (two slashes)
-  else if (filePath.startsWith('//')) {
-    filePath = filePath.slice(1) // //path -> /path
-    if (process.platform === 'win32' && filePath.match(/^\/[A-Za-z]:\//)) {
-      filePath = filePath.slice(1)
-    }
-  }
-  // Handle file:/path (one slash before Windows drive letter)
-  else if (filePath.startsWith('/')) {
-    if (process.platform === 'win32' && filePath.match(/^\/[A-Za-z]:\//)) {
-      filePath = filePath.slice(1) // /C:/path -> C:/path
-    }
-    // On Unix, /path is already correct
-  }
-
-  if (path.isAbsolute(filePath)) return filePath
-
-  // Relative path - resolve from cwd
-  return path.resolve(process.cwd(), filePath.replace(/^\.\//, ''))
+if (!dbPath) {
+  console.error('[init-db] ERROR: Database path not provided');
+  console.error('[init-db] Usage: node scripts/init-db.js <databaseFilePath>');
+  process.exit(1);
 }
 
-/**
- * Ensure the database file and its parent directory exist.
- * Creates an empty file if it doesn't exist so SQLite can initialize it.
- */
-export function ensureDatabaseFile(): string | null {
-  const dbPath = getDbFilePath()
-  if (!dbPath) {
-    console.error('[db-schema] Cannot determine database path - DATABASE_URL not set or not file: protocol')
-    return null
-  }
+console.log('[init-db] Database path:', dbPath);
 
-  const dbDir = path.dirname(dbPath)
-  if (!existsSync(dbDir)) {
-    mkdirSync(dbDir, { recursive: true })
-    console.log('[db-schema] Created database directory:', dbDir)
-  }
-  if (!existsSync(dbPath)) {
-    writeFileSync(dbPath, '')
-    console.log('[db-schema] Created empty database file:', dbPath)
-  }
-  return dbPath
+// Ensure directory exists
+const dbDir = path.dirname(dbPath);
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+  console.log('[init-db] Created directory:', dbDir);
 }
 
-/**
- * All CREATE TABLE statements for the Attindo database.
- * These mirror the Prisma schema in prisma/schema.prisma.
- * Uses IF NOT EXISTS so it's safe to call multiple times.
- */
+// Ensure database file exists (empty file is fine, SQLite will initialize it)
+if (!fs.existsSync(dbPath)) {
+  fs.writeFileSync(dbPath, '');
+  console.log('[init-db] Created empty database file:', dbPath);
+}
+
 const CREATE_TABLE_SQL = [
-  // Company
   `CREATE TABLE IF NOT EXISTS Company (
     id TEXT PRIMARY KEY NOT NULL,
     name TEXT NOT NULL,
@@ -104,7 +58,6 @@ const CREATE_TABLE_SQL = [
     updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`,
 
-  // Settings
   `CREATE TABLE IF NOT EXISTS Settings (
     id TEXT PRIMARY KEY NOT NULL,
     key TEXT NOT NULL UNIQUE,
@@ -112,7 +65,6 @@ const CREATE_TABLE_SQL = [
     category TEXT NOT NULL DEFAULT 'general'
   )`,
 
-  // User
   `CREATE TABLE IF NOT EXISTS User (
     id TEXT PRIMARY KEY NOT NULL,
     username TEXT NOT NULL UNIQUE,
@@ -126,7 +78,6 @@ const CREATE_TABLE_SQL = [
     updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`,
 
-  // Department
   `CREATE TABLE IF NOT EXISTS Department (
     id TEXT PRIMARY KEY NOT NULL,
     name TEXT NOT NULL,
@@ -137,7 +88,6 @@ const CREATE_TABLE_SQL = [
     updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`,
 
-  // Position
   `CREATE TABLE IF NOT EXISTS Position (
     id TEXT PRIMARY KEY NOT NULL,
     title TEXT NOT NULL,
@@ -150,7 +100,6 @@ const CREATE_TABLE_SQL = [
     FOREIGN KEY (departmentId) REFERENCES Department(id)
   )`,
 
-  // Employee
   `CREATE TABLE IF NOT EXISTS Employee (
     id TEXT PRIMARY KEY NOT NULL,
     employeeId TEXT NOT NULL UNIQUE,
@@ -182,7 +131,6 @@ const CREATE_TABLE_SQL = [
     FOREIGN KEY (positionId) REFERENCES Position(id)
   )`,
 
-  // FingerprintDevice
   `CREATE TABLE IF NOT EXISTS FingerprintDevice (
     id TEXT PRIMARY KEY NOT NULL,
     name TEXT NOT NULL,
@@ -198,7 +146,6 @@ const CREATE_TABLE_SQL = [
     updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`,
 
-  // Attendance
   `CREATE TABLE IF NOT EXISTS Attendance (
     id TEXT PRIMARY KEY NOT NULL,
     employeeId TEXT NOT NULL,
@@ -217,7 +164,6 @@ const CREATE_TABLE_SQL = [
     FOREIGN KEY (employeeId) REFERENCES Employee(id)
   )`,
 
-  // LeaveType
   `CREATE TABLE IF NOT EXISTS LeaveType (
     id TEXT PRIMARY KEY NOT NULL,
     name TEXT NOT NULL,
@@ -230,7 +176,6 @@ const CREATE_TABLE_SQL = [
     updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`,
 
-  // Leave
   `CREATE TABLE IF NOT EXISTS Leave (
     id TEXT PRIMARY KEY NOT NULL,
     employeeId TEXT NOT NULL,
@@ -247,7 +192,6 @@ const CREATE_TABLE_SQL = [
     FOREIGN KEY (typeId) REFERENCES LeaveType(id)
   )`,
 
-  // SalaryComponent
   `CREATE TABLE IF NOT EXISTS SalaryComponent (
     id TEXT PRIMARY KEY NOT NULL,
     name TEXT NOT NULL,
@@ -263,7 +207,6 @@ const CREATE_TABLE_SQL = [
     updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`,
 
-  // Payroll
   `CREATE TABLE IF NOT EXISTS Payroll (
     id TEXT PRIMARY KEY NOT NULL,
     month INTEGER NOT NULL,
@@ -280,7 +223,6 @@ const CREATE_TABLE_SQL = [
     UNIQUE(month, year)
   )`,
 
-  // PayrollItem
   `CREATE TABLE IF NOT EXISTS PayrollItem (
     id TEXT PRIMARY KEY NOT NULL,
     payrollId TEXT NOT NULL,
@@ -301,7 +243,6 @@ const CREATE_TABLE_SQL = [
     FOREIGN KEY (employeeId) REFERENCES Employee(id)
   )`,
 
-  // License
   `CREATE TABLE IF NOT EXISTS License (
     id TEXT PRIMARY KEY NOT NULL,
     key TEXT NOT NULL UNIQUE,
@@ -318,7 +259,6 @@ const CREATE_TABLE_SQL = [
     updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`,
 
-  // AuditLog
   `CREATE TABLE IF NOT EXISTS AuditLog (
     id TEXT PRIMARY KEY NOT NULL,
     userId TEXT NOT NULL DEFAULT '',
@@ -329,7 +269,6 @@ const CREATE_TABLE_SQL = [
     timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`,
 
-  // Holiday
   `CREATE TABLE IF NOT EXISTS Holiday (
     id TEXT PRIMARY KEY NOT NULL,
     name TEXT NOT NULL,
@@ -341,7 +280,6 @@ const CREATE_TABLE_SQL = [
     updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`,
 
-  // LeaveType (needed for Leave foreign key)
   `CREATE TABLE IF NOT EXISTS LeaveBalance (
     id TEXT PRIMARY KEY NOT NULL,
     employeeId TEXT NOT NULL,
@@ -355,99 +293,32 @@ const CREATE_TABLE_SQL = [
     FOREIGN KEY (employeeId) REFERENCES Employee(id),
     FOREIGN KEY (typeId) REFERENCES LeaveType(id)
   )`,
-]
+];
 
-/**
- * Create all database tables using better-sqlite3 directly.
- *
- * This bypasses Prisma entirely for table creation, which avoids
- * the "Error code 14: Unable to open the database file" issue
- * caused by Prisma's DATABASE_URL parsing on Windows.
- *
- * We open the database file directly at the computed filesystem path,
- * create all tables, then close it. After this, Prisma can connect
- * normally because the database file now exists with all tables.
- *
- * @returns {success: boolean, error?: string, dbPath?: string}
- */
-export async function createAllTables(): Promise<{ success: boolean; error?: string; dbPath?: string }> {
-  let dbPath = ensureDatabaseFile()
+try {
+  console.log('[init-db] Opening database with better-sqlite3...');
+  const sqlite = new Database(dbPath);
+  sqlite.pragma('journal_mode = WAL');
+  sqlite.pragma('foreign_keys = ON');
 
-  if (!dbPath) {
-    // If we can't determine the path from DATABASE_URL, try a sensible default
-    // This handles the case where DATABASE_URL isn't set (shouldn't happen in production)
-    const defaultDir = path.join(process.cwd(), 'db')
-    if (!existsSync(defaultDir)) mkdirSync(defaultDir, { recursive: true })
-    dbPath = path.join(defaultDir, 'attindo.db')
-    if (!existsSync(dbPath)) writeFileSync(dbPath, '')
-    console.log('[db-schema] Using default database path:', dbPath)
-  }
-
-  try {
-    // Try to use better-sqlite3 directly (most reliable - bypasses Prisma URL parsing)
-    const Database = (await import('better-sqlite3')).default
-    console.log('[db-schema] Opening database directly with better-sqlite3:', dbPath)
-
-    const sqlite = new Database(dbPath)
-    sqlite.pragma('journal_mode = WAL')
-    sqlite.pragma('foreign_keys = ON')
-
-    // Create all tables in a transaction for speed
-    const createAll = sqlite.transaction(() => {
-      for (const sql of CREATE_TABLE_SQL) {
-        sqlite.exec(sql)
-      }
-    })
-    createAll()
-
-    sqlite.close()
-    console.log('[db-schema] All database tables created/verified successfully ✅')
-    return { success: true, dbPath }
-  } catch (directError) {
-    const directMsg = directError instanceof Error ? directError.message : 'Unknown error'
-    console.error('[db-schema] better-sqlite3 direct access failed:', directMsg)
-    console.log('[db-schema] Trying Prisma fallback...')
-
-    // Fallback: try Prisma's $executeRawUnsafe
-    try {
-      const { PrismaClient } = await import('@prisma/client')
-      const prisma = new PrismaClient()
-      try {
-        for (const sql of CREATE_TABLE_SQL) {
-          await prisma.$executeRawUnsafe(sql)
-        }
-        console.log('[db-schema] All tables created via Prisma fallback ✅')
-        return { success: true, dbPath }
-      } finally {
-        await prisma.$disconnect()
-      }
-    } catch (prismaError) {
-      const prismaMsg = prismaError instanceof Error ? prismaError.message : 'Unknown error'
-      console.error('[db-schema] Prisma fallback also failed:', prismaMsg)
-      return {
-        success: false,
-        error: `Database initialization failed. Direct: ${directMsg}. Prisma: ${prismaMsg}. Database path: ${dbPath}`,
-        dbPath,
-      }
+  // Create all tables in a transaction
+  const createAll = sqlite.transaction(() => {
+    for (const sql of CREATE_TABLE_SQL) {
+      sqlite.exec(sql);
     }
-  }
-}
+  });
+  createAll();
 
-/**
- * Check if the database has the required tables by trying to query the User table.
- * Uses better-sqlite3 directly to avoid Prisma connection issues.
- */
-export async function checkTablesExist(): Promise<boolean> {
-  const dbPath = getDbFilePath()
-  if (!dbPath || !existsSync(dbPath)) return false
+  // Verify tables were created
+  const tables = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all();
+  const tableNames = tables.map(t => t.name);
+  console.log('[init-db] Tables created:', tableNames.join(', '));
 
-  try {
-    const Database = (await import('better-sqlite3')).default
-    const sqlite = new Database(dbPath, { readonly: true })
-    const result = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='User'").get()
-    sqlite.close()
-    return !!result
-  } catch {
-    return false
-  }
+  sqlite.close();
+  console.log('[init-db] ✅ Database initialization completed successfully!');
+  process.exit(0);
+} catch (error) {
+  console.error('[init-db] ❌ Database initialization failed:', error.message);
+  console.error('[init-db] Stack:', error.stack);
+  process.exit(1);
 }

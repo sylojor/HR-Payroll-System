@@ -46,10 +46,19 @@ function getDatabasePath() {
 function getDatabaseUrl() {
   const dbPath = getDatabasePath();
   let normalizedPath = dbPath.replace(/\\/g, '/');
-  if (!normalizedPath.startsWith('/')) {
-    normalizedPath = '/' + normalizedPath;
+  // On Windows: file:///C:/Users/.../attindo.db (three slashes = absolute path)
+  // On Unix: file:///home/user/.../attindo.db
+  // This format is correctly parsed by both SQLite and Prisma
+  if (process.platform === 'win32') {
+    // Windows: C:/Users/... -> file:///C:/Users/...
+    return 'file:///' + normalizedPath;
+  } else {
+    // Unix: /home/user/... -> file:///home/user/...
+    if (!normalizedPath.startsWith('/')) {
+      normalizedPath = '/' + normalizedPath;
+    }
+    return 'file://' + normalizedPath;
   }
-  return 'file:' + normalizedPath;
 }
 
 /**
