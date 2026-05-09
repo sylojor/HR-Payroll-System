@@ -9,7 +9,6 @@ const nextConfig: NextConfig = {
   reactStrictMode: false,
   // Ensure these server-side packages are included in the standalone build
   serverExternalPackages: [
-    'better-sqlite3',
     '@prisma/client',
     'sharp',
   ],

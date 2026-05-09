@@ -62,15 +62,14 @@ function getDatabaseUrl() {
 }
 
 /**
- * Initialize the database using better-sqlite3 directly via init-db.js script.
- * This runs BEFORE the Next.js server starts, ensuring all tables exist.
- *
+ * Initialize the database.
  * Strategy:
- * 1. If database file exists with content -> verify it has tables ✅
- * 2. Try to copy template.db from resources -> best option ✅
- * 3. Run scripts/init-db.js with better-sqlite3 -> creates all tables ✅
+ * 1. If database file exists with content -> use it ✅
+ * 2. Try to copy template.db from resources -> BEST option ✅
+ * 3. Create empty database file -> API will create tables via raw SQL ✅
  *
- * NO MORE npx prisma db push! NO MORE Prisma URL parsing issues!
+ * The template.db file is created during CI build with all tables.
+ * This is the most reliable method - no runtime DB creation needed!
  */
 async function initializeDatabase() {
   const dbPath = getDatabasePath();
@@ -116,124 +115,18 @@ async function initializeDatabase() {
     }
   }
 
-  // No template database found - run init-db.js script to create tables
+  // No template database found - create empty file
+  // The Next.js API routes will create tables using raw SQL automatically
   log('⚠️ No template database found in resources');
-  log('Running init-db.js to create database with all tables...');
-
-  return await runInitDbScript(dbPath);
-}
-
-/**
- * Run the init-db.js script to create all database tables.
- * Uses better-sqlite3 directly - no npx, no Prisma URL parsing, no Error code 14.
- */
-function runInitDbScript(dbPath) {
-  return new Promise((resolve) => {
-    const standaloneDir = findStandaloneDir();
-    const nodeBinary = findNodeBinary();
-
-    // Find init-db.js script
-    const scriptPaths = [
-      path.join(process.resourcesPath, 'next-standalone', 'scripts', 'init-db.js'),
-      path.join(process.resourcesPath, 'app', 'next-standalone', 'scripts', 'init-db.js'),
-      path.join(__dirname, '..', 'scripts', 'init-db.js'),
-    ];
-
-    let scriptPath = null;
-    for (const sp of scriptPaths) {
-      if (fs.existsSync(sp)) {
-        scriptPath = sp;
-        log('Found init-db.js at: ' + sp);
-        break;
-      }
-    }
-
-    if (!scriptPath) {
-      log('⚠️ init-db.js not found, creating empty database file as fallback');
-      try {
-        fs.writeFileSync(dbPath, '');
-        log('Empty database file created: ' + dbPath);
-        resolve(true);
-      } catch (e) {
-        log('Failed to create database file: ' + e.message);
-        resolve(false);
-      }
-      return;
-    }
-
-    log('Running: node ' + scriptPath + ' ' + dbPath);
-
-    const env = {
-      ...process.env,
-      ELECTRON_RUN_AS_NODE: '1',
-    };
-
-    const proc = spawn(nodeBinary, [scriptPath, dbPath], {
-      env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    let output = '';
-
-    proc.stdout.on('data', (data) => {
-      const text = data.toString();
-      output += text;
-      log('[init-db] ' + text.trim());
-    });
-
-    proc.stderr.on('data', (data) => {
-      const text = data.toString();
-      output += text;
-      log('[init-db stderr] ' + text.trim());
-    });
-
-    proc.on('error', (err) => {
-      log('init-db.js spawn error: ' + err.message);
-      // Fallback: create empty file
-      try {
-        fs.writeFileSync(dbPath, '');
-        log('Created empty database file as fallback');
-        resolve(true);
-      } catch (e) {
-        resolve(false);
-      }
-    });
-
-    proc.on('close', (code) => {
-      if (code === 0) {
-        log('✅ Database tables created successfully via init-db.js');
-        resolve(true);
-      } else {
-        log('⚠️ init-db.js exited with code ' + code);
-        // Even if it failed, the file might have been partially created
-        if (fs.existsSync(dbPath) && fs.statSync(dbPath).size > 0) {
-          log('Database file exists with content, continuing...');
-          resolve(true);
-        } else {
-          // Last resort: create empty file
-          try {
-            fs.writeFileSync(dbPath, '');
-            log('Created empty database file as last resort');
-            resolve(true);
-          } catch (e) {
-            resolve(false);
-          }
-        }
-      }
-    });
-
-    // Timeout after 15 seconds
-    setTimeout(() => {
-      log('init-db.js timeout, killing process');
-      proc.kill();
-      // If file exists, it might be partially created
-      if (fs.existsSync(dbPath)) {
-        resolve(true);
-      } else {
-        resolve(false);
-      }
-    }, 15000);
-  });
+  log('Creating empty database file - API will create tables automatically...');
+  try {
+    fs.writeFileSync(dbPath, '');
+    log('Empty database file created: ' + dbPath + ' ✅');
+    return true;
+  } catch (e) {
+    log('Failed to create database file: ' + e.message);
+    return false;
+  }
 }
 
 // NOTE: runPrismaDbPush() has been REMOVED.
