@@ -39,16 +39,51 @@ jobs:
         run: bun run db:generate
 
       - name: Build Next.js
-        run: |
-          bun run build
-          xcopy /E /I /Y ".next\static" ".next\standalone\.next\static"
-          xcopy /E /I /Y "public" ".next\standalone\public"
+        run: bun run build
 
-      - name: Copy Prisma files to standalone
+      - name: Copy static files to standalone
+        shell: pwsh
         run: |
-          xcopy /E /I /Y "prisma" ".next\standalone\prisma"
-          if exist "node_modules\.prisma" xcopy /E /I /Y "node_modules\.prisma" ".next\standalone\node_modules\.prisma"
-          if exist "node_modules\@prisma" xcopy /E /I /Y "node_modules\@prisma" ".next\standalone\node_modules\@prisma"
+          Copy-Item -Path ".next\static" -Destination ".next\standalone\.next\static" -Recurse -Force
+          Copy-Item -Path "public" -Destination ".next\standalone\public" -Recurse -Force
+
+      - name: Copy Prisma and node_modules to standalone
+        shell: pwsh
+        run: |
+          # Copy prisma schema
+          Copy-Item -Path "prisma" -Destination ".next\standalone\prisma" -Recurse -Force
+          
+          # Create node_modules directories
+          $nmDir = ".next\standalone\node_modules"
+          if (-not (Test-Path $nmDir)) { New-Item -ItemType Directory -Path $nmDir -Force }
+          
+          # Copy .prisma client
+          if (Test-Path "node_modules\.prisma") {
+            Copy-Item -Path "node_modules\.prisma" -Destination "$nmDir\.prisma" -Recurse -Force
+          }
+          
+          # Copy @prisma packages
+          if (Test-Path "node_modules\@prisma") {
+            Copy-Item -Path "node_modules\@prisma" -Destination "$nmDir\@prisma" -Recurse -Force
+          }
+          
+          # Copy better-sqlite3 native module
+          if (Test-Path "node_modules\better-sqlite3") {
+            Copy-Item -Path "node_modules\better-sqlite3" -Destination "$nmDir\better-sqlite3" -Recurse -Force
+          }
+          
+          # Copy binding file
+          if (Test-Path "node_modules\binding") {
+            Copy-Item -Path "node_modules\binding" -Destination "$nmDir\binding" -Recurse -Force
+          }
+          
+          # Copy file-uri-to-path
+          if (Test-Path "node_modules\file-uri-to-path") {
+            Copy-Item -Path "node_modules\file-uri-to-path" -Destination "$nmDir\file-uri-to-path" -Recurse -Force
+          }
+
+          Write-Host "Files copied successfully"
+          Get-ChildItem ".next\standalone\node_modules" -Directory | ForEach-Object { Write-Host "  $($_.Name)" }
 
       - name: Build Electron App (Windows)
         run: npx electron-builder --win --publish never
@@ -69,7 +104,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.VERSION }}
-          name: Attindo v${{ steps.version.outputs.VERSION }}
+          name: "Attindo v${{ steps.version.outputs.VERSION }}"
           body: |
             # 🏢 Attindo HR & Payroll System v${{ steps.version.outputs.VERSION }}
 
@@ -90,7 +125,7 @@ jobs:
             - Windows 10 or later (64-bit)
             - 4 GB RAM minimum
             - 500 MB disk space
-            - ZK Fingerprint Device (optional, for biometric attendance)
+            - ZK Fingerprint Device (optional)
 
             ## 🚀 Installation
             1. Download `Attindo-Setup-${{ steps.version.outputs.VERSION }}.exe`
