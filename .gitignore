@@ -63,3 +63,5 @@ server.log
 # Database
 db/*.db
 db/*.db-journal
+db/*.db-bak
+db/*.bak
