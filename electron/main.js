@@ -45,9 +45,20 @@ function getDatabasePath() {
 
 function ensureDatabase() {
   const dbPath = getDatabasePath();
+  const dataDir = getAppDataDir();
+  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+  // Don't create an empty file - SQLite needs a valid database header
+  // prisma db push will create the file properly
   if (!fs.existsSync(dbPath)) {
-    fs.writeFileSync(dbPath, '');
-    log('Created new database at: ' + dbPath);
+    log('Database file does not exist yet, will be created by prisma db push');
+  } else {
+    const stat = fs.statSync(dbPath);
+    if (stat.size === 0) {
+      log('Database file is empty (0 bytes), removing so prisma can create it properly');
+      fs.unlinkSync(dbPath);
+    } else {
+      log('Database file exists (' + stat.size + ' bytes)');
+    }
   }
   return dbPath;
 }
@@ -165,6 +176,117 @@ function ensureNodeModulesAccessible(standaloneDir) {
   }
 
   return null;
+}
+
+// ========== PRISMA DB PUSH ==========
+// Run prisma db push to create/update the database schema before starting the server
+function runPrismaDbPush() {
+  return new Promise((resolve, reject) => {
+    const standaloneDir = findStandaloneDir();
+    if (!standaloneDir) {
+      reject(new Error('Standalone directory not found'));
+      return;
+    }
+
+    const nodeBinary = findNodeBinary();
+    const dbUrl = getDatabaseUrl();
+
+    // Find prisma CLI - check multiple locations
+    const prismaLocations = [
+      path.join(standaloneDir, '.next', 'node_modules', 'prisma', 'build', 'index.js'),
+      path.join(standaloneDir, 'node_modules', 'prisma', 'build', 'index.js'),
+      path.join(standaloneDir, '.next', 'node_modules', '.bin', 'prisma'),
+      path.join(standaloneDir, 'node_modules', '.bin', 'prisma'),
+    ];
+
+    let prismaCli = null;
+    for (const loc of prismaLocations) {
+      if (fs.existsSync(loc)) {
+        prismaCli = loc;
+        log('Found Prisma CLI at: ' + loc);
+        break;
+      }
+    }
+
+    // Also check if schema exists
+    const schemaPath = path.join(standaloneDir, 'prisma', 'schema.prisma');
+    if (!fs.existsSync(schemaPath)) {
+      log('⚠️ Prisma schema not found at: ' + schemaPath + ', skipping db push');
+      resolve(false);
+      return;
+    }
+
+    if (!prismaCli) {
+      log('⚠️ Prisma CLI not found, skipping db push');
+      resolve(false);
+      return;
+    }
+
+    log('Running prisma db push...');
+    log('  DATABASE_URL: ' + dbUrl);
+    log('  Schema: ' + schemaPath);
+
+    const env = {
+      ...process.env,
+      DATABASE_URL: dbUrl,
+      NODE_ENV: 'production',
+    };
+
+    // If using Electron as Node, set the flag
+    if (nodeBinary === process.execPath) {
+      env.ELECTRON_RUN_AS_NODE = '1';
+    }
+
+    const prismaProc = spawn(nodeBinary, [prismaCli, 'db', 'push', '--schema', schemaPath, '--skip-generate', '--accept-data-loss'], {
+      env,
+      cwd: standaloneDir,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let output = '';
+
+    prismaProc.stdout.on('data', (data) => {
+      const text = data.toString();
+      output += text;
+      log('[prisma db push] ' + text.trim());
+    });
+
+    prismaProc.stderr.on('data', (data) => {
+      const text = data.toString();
+      output += text;
+      log('[prisma db push stderr] ' + text.trim());
+    });
+
+    prismaProc.on('error', (err) => {
+      log('prisma db push spawn error: ' + err.message);
+      // Don't reject - the server might still work if the DB already has schema
+      resolve(false);
+    });
+
+    prismaProc.on('close', (code) => {
+      if (code === 0) {
+        log('✅ prisma db push completed successfully');
+        resolve(true);
+      } else {
+        log('⚠️ prisma db push exited with code ' + code);
+        // If the DB file now exists and has content, it's probably fine
+        const dbPath = getDatabasePath();
+        if (fs.existsSync(dbPath) && fs.statSync(dbPath).size > 0) {
+          log('Database file exists with content, continuing...');
+          resolve(true);
+        } else {
+          resolve(false);
+        }
+      }
+    });
+
+    // Timeout after 30 seconds
+    setTimeout(() => {
+      log('prisma db push timeout, killing process');
+      prismaProc.kill();
+      resolve(false);
+    }, 30000);
+  });
 }
 
 // ========== NEXT.JS SERVER ==========
@@ -603,6 +725,21 @@ app.whenReady().then(async () => {
     const dbPath = ensureDatabase();
     log('Database path: ' + dbPath);
     log('Database URL: ' + getDatabaseUrl());
+
+    // Run prisma db push to create/update database schema BEFORE starting server
+    if (!isDev) {
+      try {
+        log('Running prisma db push to initialize database schema...');
+        const dbPushResult = await runPrismaDbPush();
+        if (dbPushResult) {
+          log('Database schema initialized successfully');
+        } else {
+          log('⚠️ prisma db push did not complete, database may not have schema');
+        }
+      } catch (dbErr) {
+        log('prisma db push failed: ' + dbErr.message);
+      }
+    }
 
     let serverReady = false;
 

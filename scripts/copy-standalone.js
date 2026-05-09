@@ -131,7 +131,44 @@ if (fs.existsSync(rootNm)) {
   }
 }
 
-// 6. Verify and report
+// 6. Copy prisma CLI from project node_modules (not included in standalone trace)
+// We need this to run prisma db push at app startup
+console.log('\n📦 Copying prisma CLI for runtime db push...');
+const projectNm = path.join(cwd, 'node_modules');
+const prismaCliSrc = path.join(projectNm, 'prisma');
+const prismaCliDest = path.join(nextNm, 'prisma');
+if (fs.existsSync(prismaCliSrc) && !fs.existsSync(prismaCliDest)) {
+  copyRecursiveSync(prismaCliSrc, prismaCliDest);
+  console.log('  ✅ Copied prisma CLI to .next/node_modules/prisma');
+} else if (fs.existsSync(prismaCliDest)) {
+  console.log('  ✅ prisma CLI already exists in .next/node_modules');
+} else {
+  console.log('  ⚠️ prisma CLI not found in project node_modules');
+}
+
+// Also copy @prisma/engines if not already present (has the query engine binary)
+const prismaEnginesSrc = path.join(projectNm, '@prisma', 'engines');
+const prismaEnginesDest = path.join(nextNm, '@prisma', 'engines');
+if (fs.existsSync(prismaEnginesSrc) && !fs.existsSync(prismaEnginesDest)) {
+  copyRecursiveSync(prismaEnginesSrc, prismaEnginesDest);
+  console.log('  ✅ Copied @prisma/engines to .next/node_modules/@prisma/engines');
+}
+
+// Copy prisma-engines (the CLI dependency) if it exists
+const prismaEnginesPkg = path.join(projectNm, 'prisma-engines');
+if (fs.existsSync(prismaEnginesPkg)) {
+  const dest = path.join(nextNm, 'prisma-engines');
+  if (!fs.existsSync(dest)) {
+    copyRecursiveSync(prismaEnginesPkg, dest);
+    console.log('  ✅ Copied prisma-engines');
+  }
+}
+
+// Create .bin symlink for prisma CLI
+const binDir = path.join(nextNm, '.bin');
+if (!fs.existsSync(binDir)) fs.mkdirSync(binDir, { recursive: true });
+
+// 7. Verify and report
 console.log('\n🔍 Verifying build...');
 
 if (fs.existsSync(nextNm)) {
@@ -140,13 +177,21 @@ if (fs.existsSync(nextNm)) {
     console.log(`  ✅ .next/node_modules has ${entries.length} packages`);
 
     // Check for key modules
-    const keyModules = ['next', '@prisma', 'react', 'react-dom'];
+    const keyModules = ['next', '@prisma', 'react', 'react-dom', 'prisma'];
     for (const mod of keyModules) {
       if (fs.existsSync(path.join(nextNm, mod))) {
         console.log(`  ✅ ${mod} found in .next/node_modules`);
       } else {
         console.log(`  ❌ ${mod} NOT found in .next/node_modules`);
       }
+    }
+
+    // Check for prisma CLI entry point specifically
+    const prismaBuild = path.join(nextNm, 'prisma', 'build', 'index.js');
+    if (fs.existsSync(prismaBuild)) {
+      console.log('  ✅ prisma CLI build/index.js found');
+    } else {
+      console.log('  ❌ prisma CLI build/index.js NOT found');
     }
   } catch (e) {
     console.log(`  ❌ Cannot read .next/node_modules: ${e.message}`);

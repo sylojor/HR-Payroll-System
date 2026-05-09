@@ -63,7 +63,7 @@ jobs:
           }
 
           # Check for critical modules in .next/node_modules
-          $criticalModules = @('next', 'react', 'react-dom', '@prisma', 'styled-jsx')
+          $criticalModules = @('next', 'react', 'react-dom', '@prisma', 'styled-jsx', 'prisma')
           foreach ($mod in $criticalModules) {
             $modPath = Join-Path $nextNm $mod
             if (Test-Path $modPath) {
@@ -71,6 +71,14 @@ jobs:
             } else {
               Write-Host "❌ $mod NOT found in .next/node_modules"
             }
+          }
+
+          # Check for prisma CLI entry point
+          $prismaBuild = Join-Path $nextNm "prisma\build\index.js"
+          if (Test-Path $prismaBuild) {
+            Write-Host "✅ prisma CLI build/index.js found"
+          } else {
+            Write-Host "❌ prisma CLI build/index.js NOT found"
           }
 
           # Check that next/dist/server exists
