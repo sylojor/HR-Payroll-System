@@ -26,9 +26,64 @@
   "build": {
     "appId": "com.attindo.hr-payroll",
     "productName": "Attindo",
+    "copyright": "Copyright © 2025 Attindo",
     "directories": {
       "buildResources": "build",
       "output": "release"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "Attindo-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Attindo"
+    },
+    "files": [
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": ".next/standalone",
+        "to": "next-standalone",
+        "filter": ["**/*"]
+      },
+      {
+        "from": ".next/static",
+        "to": "next-standalone/.next/static",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "public",
+        "to": "next-standalone/public",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "prisma",
+        "to": "prisma",
+        "filter": ["**/*"]
+      }
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "**/*.node",
+      "**/*.dll"
+    ],
+    "publish": {
+      "provider": "github",
+      "owner": "sylojor",
+      "repo": "HR-Payroll-System"
     }
   },
   "dependencies": {

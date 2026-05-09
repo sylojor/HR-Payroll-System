@@ -49,22 +49,41 @@ jobs:
       - name: Verify standalone build
         shell: pwsh
         run: |
-          Write-Host "Standalone directory structure:"
-          if (Test-Path ".next\standalone") {
-            Get-ChildItem ".next\standalone" -Depth 1 | ForEach-Object { Write-Host "  $($_.FullName)" }
-          } else {
-            Write-Error "Standalone directory not found!"
-          }
+          Write-Host "=== Verifying standalone build ==="
           if (Test-Path ".next\standalone\server.js") {
             Write-Host "✅ server.js found"
           } else {
-            Write-Error "server.js not found in standalone!"
+            Write-Error "❌ server.js NOT found!"
+            exit 1
+          }
+          if (Test-Path ".next\standalone\.next\static") {
+            Write-Host "✅ static files found"
+          } else {
+            Write-Warning "⚠️ static files NOT found"
+          }
+          if (Test-Path ".next\standalone\public") {
+            Write-Host "✅ public folder found"
+          } else {
+            Write-Warning "⚠️ public folder NOT found"
+          }
+          if (Test-Path "build\icon.ico") {
+            Write-Host "✅ icon.ico found"
+          } else {
+            Write-Error "❌ icon.ico NOT found!"
+            exit 1
+          }
+          if (Test-Path "electron\main.js") {
+            Write-Host "✅ electron/main.js found"
+          } else {
+            Write-Error "❌ electron/main.js NOT found!"
+            exit 1
           }
 
       - name: Build Electron App (Windows)
-        run: npx electron-builder --win --config electron-builder.yml --publish never
+        run: npx electron-builder --win --publish never 2>&1
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_ENV: production
 
       - name: Get version
         id: version
@@ -79,10 +98,14 @@ jobs:
       - name: List release files
         shell: pwsh
         run: |
+          Write-Host "=== Release directory ==="
           if (Test-Path "release") {
-            Get-ChildItem "release" -Recurse | ForEach-Object { Write-Host "  $($_.FullName) - $([math]::Round($_.Length / 1MB, 2)) MB" }
+            Get-ChildItem "release" -Recurse -File | ForEach-Object { 
+              $sizeMB = [math]::Round($_.Length / 1MB, 2)
+              Write-Host "  $($_.Name) - ${sizeMB}MB"
+            }
           } else {
-            Write-Host "No release directory found"
+            Write-Warning "No release directory found!"
           }
 
       - name: Create Release
@@ -110,7 +133,6 @@ jobs:
             - Windows 10 or later (64-bit)
             - 4 GB RAM minimum
             - 500 MB disk space
-            - ZK Fingerprint Device (optional)
 
             ## 🚀 Installation
             1. Download `Attindo-Setup-${{ steps.version.outputs.VERSION }}.exe`
