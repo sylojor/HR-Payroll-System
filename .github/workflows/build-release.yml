@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g., 1.0.0)'
+        description: 'Release version (e.g., 1.7.0)'
         required: true
-        default: '1.0.0'
+        default: '1.7.0'
 
 permissions:
   contents: write
@@ -38,7 +38,45 @@ jobs:
       - name: Build Next.js
         run: npx next build
         env:
-          DATABASE_URL: "file:./db/attindo.db"
+          DATABASE_URL: "file:./db/template.db"
+
+      - name: Create template database
+        shell: pwsh
+        run: |
+          Write-Host "=== Creating template database ==="
+
+          # Create a fresh SQLite database with all tables using prisma db push
+          # This template will be bundled with the app and copied on first launch
+          $env:DATABASE_URL = "file:./build/template.db"
+
+          # Ensure build directory exists
+          New-Item -ItemType Directory -Force -Path "build" | Out-Null
+
+          # Run prisma db push to create the template database with all tables
+          npx prisma db push --skip-generate --accept-data-loss
+
+          if (Test-Path "build/template.db") {
+            $size = (Get-Item "build/template.db").Length
+            Write-Host "✅ Template database created ($size bytes)"
+
+            # Verify the template has tables by checking file size
+            if ($size -gt 1000) {
+              Write-Host "✅ Template database appears valid (>1KB)"
+            } else {
+              Write-Host "⚠️ Template database is suspiciously small, might be empty"
+            }
+          } else {
+            Write-Host "❌ Template database was NOT created!"
+            Write-Host "Attempting alternative approach..."
+
+            # Alternative: use the db from the build process
+            if (Test-Path "db/template.db") {
+              Copy-Item "db/template.db" "build/template.db" -Force
+              Write-Host "✅ Copied template from db directory"
+            } else {
+              Write-Host "❌ No template database available. Build may fail on first launch."
+            }
+          }
 
       - name: Copy standalone files & merge node_modules
         run: node scripts/copy-standalone.js
@@ -51,50 +89,47 @@ jobs:
           $standaloneDir = ".next\standalone"
           $nextNm = "$standaloneDir\.next\node_modules"
 
-          # Check .next/node_modules (this is where ALL modules should be after merge)
+          # Check .next/node_modules
           if (Test-Path $nextNm) {
             $entries = Get-ChildItem $nextNm -Directory
             Write-Host "✅ .next/node_modules has $($entries.Count) packages"
-            
-            # List all packages for debugging
-            $entries | ForEach-Object { Write-Host "  - $($_.Name)" }
           } else {
             Write-Host "❌ .next/node_modules DOES NOT EXIST!"
           }
 
-          # Check for critical modules in .next/node_modules
+          # Check for critical modules
           $criticalModules = @('next', 'react', 'react-dom', '@prisma', 'styled-jsx', 'prisma')
           foreach ($mod in $criticalModules) {
             $modPath = Join-Path $nextNm $mod
             if (Test-Path $modPath) {
-              Write-Host "✅ $mod found in .next/node_modules"
+              Write-Host "✅ $mod found"
             } else {
-              Write-Host "❌ $mod NOT found in .next/node_modules"
+              Write-Host "❌ $mod NOT found"
             }
           }
 
-          # Check for prisma CLI entry point
+          # Check prisma CLI
           $prismaBuild = Join-Path $nextNm "prisma\build\index.js"
           if (Test-Path $prismaBuild) {
-            Write-Host "✅ prisma CLI build/index.js found"
+            Write-Host "✅ prisma CLI found"
           } else {
-            Write-Host "❌ prisma CLI build/index.js NOT found"
+            Write-Host "❌ prisma CLI NOT found"
           }
 
-          # Check that next/dist/server exists
-          $nextServerDir = Join-Path $nextNm "next\dist\server"
-          if (Test-Path $nextServerDir) {
-            Write-Host "✅ next/dist/server exists"
+          # Check template database
+          if (Test-Path "build\template.db") {
+            $size = (Get-Item "build\template.db").Length
+            Write-Host "✅ Template database exists ($size bytes)"
           } else {
-            Write-Host "❌ next/dist/server MISSING"
+            Write-Host "❌ Template database NOT found!"
           }
 
-          # Check for root node_modules (should NOT exist after merge)
-          $rootNm = "$standaloneDir\node_modules"
-          if (Test-Path $rootNm) {
-            Write-Host "⚠️ Root node_modules still exists (will be pruned by electron-builder)"
+          # Check that .env is NOT in standalone (we don't want it overriding DATABASE_URL)
+          if (Test-Path "$standaloneDir\.env") {
+            Write-Host "⚠️ .env file found in standalone - removing to avoid DATABASE_URL conflict"
+            Remove-Item "$standaloneDir\.env" -Force
           } else {
-            Write-Host "✅ Root node_modules removed (all modules in .next/node_modules)"
+            Write-Host "✅ No .env file in standalone (correct)"
           }
 
           # Report standalone size
@@ -114,6 +149,13 @@ jobs:
 
           $fileSize = (Get-Item "build\node.exe").Length / 1MB
           Write-Host "✅ Node.js binary copied ($([math]::Round($fileSize, 2)) MB)"
+
+          # Verify template.db is still there
+          if (Test-Path "build\template.db") {
+            Write-Host "✅ Template database still in build directory"
+          } else {
+            Write-Host "❌ Template database missing from build directory!"
+          }
 
       - name: Build Electron App (Windows)
         run: npx electron-builder --win --publish never
@@ -162,7 +204,9 @@ jobs:
             - 🏖️ Leave Management
             - 💰 Payroll Processing
             - 🔐 License Management
+            - 💾 Backup & Restore
             - ⚙️ Settings & Configuration
+            - 🌐 Bilingual (English/Arabic)
 
             ## 📋 System Requirements
             - Windows 10 or later (64-bit)
@@ -172,17 +216,27 @@ jobs:
             ## 🚀 Installation
             1. Download `Attindo-Setup-${{ steps.version.outputs.VERSION }}.exe`
             2. Run the installer
-            3. Follow the setup wizard
-            4. Launch Attindo from your desktop
+            3. Launch Attindo from your desktop
+            4. Login with default credentials
 
-            ## 🔑 Default Login
+            ## 🔑 Default Login (Auto-Created)
             - Username: `admin`
             - Password: `admin123`
 
-            ## 📜 License Keys (Testing)
+            > ⚠️ **Please change the default password after first login** from Settings → Security
+
+            ## 🔑 License Keys (Testing)
             - HR Module: `ATT-HR-2025-PRO-001`
             - Payroll Module: `ATT-PAY-2025-PRO-001`
             - Fingerprint Pro: `ATT-FP-2025-PRO-010`
+
+            ## 🆕 What's New in v1.7.0
+            - ✅ Fixed database initialization error (Error code 14)
+            - ✅ Auto-creates default admin user on first launch
+            - ✅ Added backup & restore functionality
+            - ✅ Added password change from Settings
+            - ✅ Added database health check
+            - ✅ Improved Windows installer reliability
 
             ---
             *Built with ❤️ by Attindo Team*

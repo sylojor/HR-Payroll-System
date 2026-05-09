@@ -1,6 +1,6 @@
 {
   "name": "attindo",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Attindo - Professional HR & Payroll Management System with ZK Fingerprint Support",
   "main": "electron/main.js",
   "author": "Attindo",
@@ -62,9 +62,13 @@
         "to": "node/node.exe"
       },
       {
+        "from": "build/template.db",
+        "to": "db/template.db"
+      },
+      {
         "from": ".next/standalone",
         "to": "next-standalone",
-        "filter": ["**/*"]
+        "filter": ["**/*", "!.env"]
       },
       {
         "from": ".next/static",

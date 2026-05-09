@@ -1,6 +1,6 @@
 const { app, BrowserWindow, Menu, shell, dialog, ipcMain } = require('electron');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const http = require('http');
 
@@ -23,7 +23,7 @@ function log(msg) {
 }
 
 log('=== Attindo Starting ===');
-log('Version: 1.6.0');
+log('Version: 1.7.0');
 log('Mode: ' + (isDev ? 'Development' : 'Production'));
 log('App Path: ' + app.getAppPath());
 log('Resources: ' + process.resourcesPath);
@@ -43,26 +43,6 @@ function getDatabasePath() {
   return path.join(getAppDataDir(), 'attindo.db');
 }
 
-function ensureDatabase() {
-  const dbPath = getDatabasePath();
-  const dataDir = getAppDataDir();
-  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-  // Don't create an empty file - SQLite needs a valid database header
-  // prisma db push will create the file properly
-  if (!fs.existsSync(dbPath)) {
-    log('Database file does not exist yet, will be created by prisma db push');
-  } else {
-    const stat = fs.statSync(dbPath);
-    if (stat.size === 0) {
-      log('Database file is empty (0 bytes), removing so prisma can create it properly');
-      fs.unlinkSync(dbPath);
-    } else {
-      log('Database file exists (' + stat.size + ' bytes)');
-    }
-  }
-  return dbPath;
-}
-
 function getDatabaseUrl() {
   const dbPath = getDatabasePath();
   let normalizedPath = dbPath.replace(/\\/g, '/');
@@ -70,6 +50,162 @@ function getDatabaseUrl() {
     normalizedPath = '/' + normalizedPath;
   }
   return 'file:' + normalizedPath;
+}
+
+/**
+ * Initialize the database by copying the template database from resources.
+ * This is the MOST RELIABLE way to ensure the database has all tables:
+ * we pre-create the database during the CI build and bundle it.
+ * No need for `prisma db push` at runtime!
+ */
+function initializeDatabase() {
+  const dbPath = getDatabasePath();
+  const dataDir = getAppDataDir();
+
+  // If database already exists and has content, check if it's valid
+  if (fs.existsSync(dbPath)) {
+    const stat = fs.statSync(dbPath);
+    if (stat.size > 100) {
+      log('Database already exists (' + stat.size + ' bytes) ✅');
+      return true;
+    } else {
+      log('Database file is empty/corrupt (' + stat.size + ' bytes), removing...');
+      try { fs.unlinkSync(dbPath); } catch (e) {
+        log('Failed to remove corrupt database: ' + e.message);
+        return false;
+      }
+    }
+  }
+
+  // Try to copy the template database from resources
+  const templatePaths = [
+    path.join(process.resourcesPath, 'db', 'template.db'),
+    path.join(process.resourcesPath, 'app', 'db', 'template.db'),
+    path.join(__dirname, '..', 'db', 'template.db'),
+  ];
+
+  for (const templatePath of templatePaths) {
+    if (fs.existsSync(templatePath)) {
+      try {
+        fs.copyFileSync(templatePath, dbPath);
+        const stat = fs.statSync(dbPath);
+        log('Database initialized from template (' + stat.size + ' bytes) ✅');
+        return true;
+      } catch (e) {
+        log('Failed to copy template database from ' + templatePath + ': ' + e.message);
+      }
+    }
+  }
+
+  log('⚠️ No template database found in resources');
+  log('Will attempt prisma db push as fallback...');
+
+  // Fallback: try prisma db push
+  return runPrismaDbPush();
+}
+
+// ========== PRISMA DB PUSH (FALLBACK) ==========
+function runPrismaDbPush() {
+  return new Promise((resolve) => {
+    const standaloneDir = findStandaloneDir();
+    if (!standaloneDir) {
+      log('Standalone directory not found, cannot run prisma db push');
+      resolve(false);
+      return;
+    }
+
+    const nodeBinary = findNodeBinary();
+    const dbUrl = getDatabaseUrl();
+
+    // Find prisma CLI
+    const prismaLocations = [
+      path.join(standaloneDir, '.next', 'node_modules', 'prisma', 'build', 'index.js'),
+      path.join(standaloneDir, 'node_modules', 'prisma', 'build', 'index.js'),
+    ];
+
+    let prismaCli = null;
+    for (const loc of prismaLocations) {
+      if (fs.existsSync(loc)) {
+        prismaCli = loc;
+        log('Found Prisma CLI at: ' + loc);
+        break;
+      }
+    }
+
+    const schemaPath = path.join(standaloneDir, 'prisma', 'schema.prisma');
+    if (!fs.existsSync(schemaPath)) {
+      log('⚠️ Prisma schema not found, skipping db push');
+      resolve(false);
+      return;
+    }
+
+    if (!prismaCli) {
+      log('⚠️ Prisma CLI not found, skipping db push');
+      resolve(false);
+      return;
+    }
+
+    log('Running prisma db push (fallback)...');
+    log('  DATABASE_URL: ' + dbUrl);
+
+    const env = {
+      ...process.env,
+      DATABASE_URL: dbUrl,
+      NODE_ENV: 'production',
+    };
+
+    if (nodeBinary === process.execPath) {
+      env.ELECTRON_RUN_AS_NODE = '1';
+    }
+
+    const prismaProc = spawn(nodeBinary, [prismaCli, 'db', 'push', '--schema', schemaPath, '--skip-generate', '--accept-data-loss'], {
+      env,
+      cwd: standaloneDir,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let output = '';
+
+    prismaProc.stdout.on('data', (data) => {
+      const text = data.toString();
+      output += text;
+      log('[prisma] ' + text.trim());
+    });
+
+    prismaProc.stderr.on('data', (data) => {
+      const text = data.toString();
+      output += text;
+      log('[prisma stderr] ' + text.trim());
+    });
+
+    prismaProc.on('error', (err) => {
+      log('prisma db push spawn error: ' + err.message);
+      resolve(false);
+    });
+
+    prismaProc.on('close', (code) => {
+      if (code === 0) {
+        log('✅ prisma db push completed');
+        resolve(true);
+      } else {
+        log('⚠️ prisma db push exited with code ' + code);
+        const dbPath = getDatabasePath();
+        if (fs.existsSync(dbPath) && fs.statSync(dbPath).size > 0) {
+          log('Database file exists with content, continuing...');
+          resolve(true);
+        } else {
+          resolve(false);
+        }
+      }
+    });
+
+    // Timeout after 30 seconds
+    setTimeout(() => {
+      log('prisma db push timeout, killing process');
+      prismaProc.kill();
+      resolve(false);
+    }, 30000);
+  });
 }
 
 // ========== FIND NODE.JS BINARY ==========
@@ -123,15 +259,10 @@ function findStandaloneDir() {
 }
 
 // ========== ENSURE NODE_MODULES IS ACCESSIBLE ==========
-// The standalone build puts all modules in .next/node_modules/
-// We need to make sure require('next') can find them.
-// Strategy: Create a node_modules junction/symlink at standalone root
-// pointing to .next/node_modules so server.js can resolve modules.
 function ensureNodeModulesAccessible(standaloneDir) {
   const rootNm = path.join(standaloneDir, 'node_modules');
   const nextNm = path.join(standaloneDir, '.next', 'node_modules');
 
-  // Check if root node_modules already exists and has 'next'
   if (fs.existsSync(rootNm)) {
     const nextMod = path.join(rootNm, 'next');
     if (fs.existsSync(nextMod)) {
@@ -142,26 +273,19 @@ function ensureNodeModulesAccessible(standaloneDir) {
 
   log('Root node_modules missing or incomplete');
 
-  // Check if .next/node_modules exists with 'next'
   if (fs.existsSync(nextNm)) {
     const nextMod = path.join(nextNm, 'next');
     if (fs.existsSync(nextMod)) {
       log('Found .next/node_modules with next module ✅');
-      
-      // Create a junction from root node_modules -> .next/node_modules
-      // This way server.js can resolve require('next') normally
       try {
-        // Remove any existing broken node_modules
         if (fs.existsSync(rootNm)) {
           fs.rmSync(rootNm, { recursive: true, force: true });
         }
-        // On Windows, use junction (doesn't require admin privileges)
         fs.symlinkSync(nextNm, rootNm, 'junction');
         log('Created node_modules junction -> .next/node_modules ✅');
         return rootNm;
       } catch (symlinkErr) {
         log('Failed to create junction: ' + symlinkErr.message);
-        log('Will use NODE_PATH fallback instead');
         return nextNm;
       }
     } else {
@@ -178,117 +302,6 @@ function ensureNodeModulesAccessible(standaloneDir) {
   return null;
 }
 
-// ========== PRISMA DB PUSH ==========
-// Run prisma db push to create/update the database schema before starting the server
-function runPrismaDbPush() {
-  return new Promise((resolve, reject) => {
-    const standaloneDir = findStandaloneDir();
-    if (!standaloneDir) {
-      reject(new Error('Standalone directory not found'));
-      return;
-    }
-
-    const nodeBinary = findNodeBinary();
-    const dbUrl = getDatabaseUrl();
-
-    // Find prisma CLI - check multiple locations
-    const prismaLocations = [
-      path.join(standaloneDir, '.next', 'node_modules', 'prisma', 'build', 'index.js'),
-      path.join(standaloneDir, 'node_modules', 'prisma', 'build', 'index.js'),
-      path.join(standaloneDir, '.next', 'node_modules', '.bin', 'prisma'),
-      path.join(standaloneDir, 'node_modules', '.bin', 'prisma'),
-    ];
-
-    let prismaCli = null;
-    for (const loc of prismaLocations) {
-      if (fs.existsSync(loc)) {
-        prismaCli = loc;
-        log('Found Prisma CLI at: ' + loc);
-        break;
-      }
-    }
-
-    // Also check if schema exists
-    const schemaPath = path.join(standaloneDir, 'prisma', 'schema.prisma');
-    if (!fs.existsSync(schemaPath)) {
-      log('⚠️ Prisma schema not found at: ' + schemaPath + ', skipping db push');
-      resolve(false);
-      return;
-    }
-
-    if (!prismaCli) {
-      log('⚠️ Prisma CLI not found, skipping db push');
-      resolve(false);
-      return;
-    }
-
-    log('Running prisma db push...');
-    log('  DATABASE_URL: ' + dbUrl);
-    log('  Schema: ' + schemaPath);
-
-    const env = {
-      ...process.env,
-      DATABASE_URL: dbUrl,
-      NODE_ENV: 'production',
-    };
-
-    // If using Electron as Node, set the flag
-    if (nodeBinary === process.execPath) {
-      env.ELECTRON_RUN_AS_NODE = '1';
-    }
-
-    const prismaProc = spawn(nodeBinary, [prismaCli, 'db', 'push', '--schema', schemaPath, '--skip-generate', '--accept-data-loss'], {
-      env,
-      cwd: standaloneDir,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    let output = '';
-
-    prismaProc.stdout.on('data', (data) => {
-      const text = data.toString();
-      output += text;
-      log('[prisma db push] ' + text.trim());
-    });
-
-    prismaProc.stderr.on('data', (data) => {
-      const text = data.toString();
-      output += text;
-      log('[prisma db push stderr] ' + text.trim());
-    });
-
-    prismaProc.on('error', (err) => {
-      log('prisma db push spawn error: ' + err.message);
-      // Don't reject - the server might still work if the DB already has schema
-      resolve(false);
-    });
-
-    prismaProc.on('close', (code) => {
-      if (code === 0) {
-        log('✅ prisma db push completed successfully');
-        resolve(true);
-      } else {
-        log('⚠️ prisma db push exited with code ' + code);
-        // If the DB file now exists and has content, it's probably fine
-        const dbPath = getDatabasePath();
-        if (fs.existsSync(dbPath) && fs.statSync(dbPath).size > 0) {
-          log('Database file exists with content, continuing...');
-          resolve(true);
-        } else {
-          resolve(false);
-        }
-      }
-    });
-
-    // Timeout after 30 seconds
-    setTimeout(() => {
-      log('prisma db push timeout, killing process');
-      prismaProc.kill();
-      resolve(false);
-    }, 30000);
-  });
-}
-
 // ========== NEXT.JS SERVER ==========
 function startNextServer() {
   return new Promise((resolve, reject) => {
@@ -303,8 +316,6 @@ function startNextServer() {
 
     if (!serverPath || !standaloneDir) {
       log('ERROR: Could not find Next.js standalone server!');
-      log('  serverPath: ' + serverPath);
-      log('  standaloneDir: ' + standaloneDir);
       reject(new Error('Next.js server not found'));
       return;
     }
@@ -312,31 +323,42 @@ function startNextServer() {
     log('Server path: ' + serverPath);
     log('Standalone dir: ' + standaloneDir);
 
-    // Ensure node_modules is accessible for require('next')
     const nodeModulesPath = ensureNodeModulesAccessible(standaloneDir);
 
     const dbUrl = getDatabaseUrl();
     log('Database URL: ' + dbUrl);
 
-    // Find Node.js binary
     const nodeBinary = findNodeBinary();
     const usingElectronAsNode = (nodeBinary === process.execPath);
     log('Node binary: ' + nodeBinary);
     log('Using Electron as Node: ' + usingElectronAsNode);
 
-    // Build NODE_PATH - include .next/node_modules as fallback
-    // even if we created a junction, NODE_PATH helps with nested requires
+    // Build NODE_PATH
     const nodePathParts = [];
     if (nodeModulesPath) {
       nodePathParts.push(nodeModulesPath);
     }
-    // Always add .next/node_modules as fallback
     const nextNm = path.join(standaloneDir, '.next', 'node_modules');
     if (fs.existsSync(nextNm) && !nodePathParts.includes(nextNm)) {
       nodePathParts.push(nextNm);
     }
     const nodePathValue = nodePathParts.join(path.delimiter);
     log('NODE_PATH will be: ' + nodePathValue);
+
+    // IMPORTANT: Remove any .env file in the standalone directory that could
+    // override our DATABASE_URL. We set DATABASE_URL via environment variable.
+    const envFile = path.join(standaloneDir, '.env');
+    if (fs.existsSync(envFile)) {
+      try {
+        const envContent = fs.readFileSync(envFile, 'utf8');
+        if (envContent.includes('DATABASE_URL')) {
+          log('⚠️ Removing .env file with DATABASE_URL to avoid conflict with runtime DB path');
+          fs.unlinkSync(envFile);
+        }
+      } catch (e) {
+        log('Could not check/remove .env: ' + e.message);
+      }
+    }
 
     // Build environment for the server process
     const serverEnv = {
@@ -348,7 +370,6 @@ function startNextServer() {
       NODE_PATH: nodePathValue,
     };
 
-    // If using Electron as Node.js, set the flag
     if (usingElectronAsNode) {
       serverEnv.ELECTRON_RUN_AS_NODE = '1';
     }
@@ -366,7 +387,7 @@ function startNextServer() {
 
       nextServer.stdout.on('data', (data) => {
         const output = data.toString();
-        log('[Next.js stdout] ' + output.trim());
+        log('[Next.js] ' + output.trim());
 
         if (!serverStarted && (output.includes('Ready') || output.includes('started') || output.includes('Listening') || output.includes('Local:'))) {
           serverStarted = true;
@@ -448,39 +469,66 @@ function waitForServer(port, maxRetries = 40) {
   });
 }
 
-// ========== CHECK DATABASE HEALTH ==========
-async function checkDatabaseHealth() {
+// ========== AUTO-INITIALIZE DATABASE ==========
+// After the server starts, check if setup is needed and auto-create admin user
+async function autoInitializeDatabase() {
   try {
-    const res = await fetch(`http://localhost:${nextPort}/api/db-health`);
-    if (res.ok) {
-      const health = await res.json();
-      log('Database health: ' + JSON.stringify(health));
-      if (health.status === 'unhealthy') {
-        log('⚠️ Database is unhealthy! Errors: ' + health.errors.join('; '));
-        return false;
-      }
+    // Check if setup is needed
+    const checkRes = await fetch(`http://localhost:${nextPort}/api/setup/check`);
+    if (!checkRes.ok) {
+      log('Setup check returned status ' + checkRes.status);
+      return false;
+    }
+    const checkData = await checkRes.json();
+
+    if (!checkData.needsSetup) {
+      log('Database already has users, no auto-init needed ✅');
+      return true;
+    }
+
+    log('No users found, auto-creating default admin user...');
+
+    // Auto-create a default admin user with sensible defaults
+    const setupRes = await fetch(`http://localhost:${nextPort}/api/setup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        company: {
+          name: 'My Company',
+          nameAr: 'شركتي',
+          address: '',
+          phone: '',
+          email: '',
+          currency: 'JOD',
+          currencySymbol: 'د.ا',
+        },
+        adminUser: {
+          username: 'admin',
+          password: 'admin123',
+          name: 'Administrator',
+          email: '',
+        },
+        settings: {
+          workingHoursPerDay: 8,
+          overtimeRate: 1.5,
+        },
+      }),
+    });
+
+    if (setupRes.ok) {
+      const data = await setupRes.json();
+      log('✅ Default admin user created successfully');
+      log('  Username: admin');
+      log('  Password: admin123');
       return true;
     } else {
-      log('Health check endpoint returned status ' + res.status);
+      const errData = await setupRes.json().catch(() => ({}));
+      log('⚠️ Auto-init failed: ' + (errData.error || 'Unknown error'));
       return false;
     }
   } catch (e) {
-    log('Health check failed: ' + e.message);
+    log('Auto-initialization error: ' + e.message);
     return false;
-  }
-}
-
-// ========== SEED DATABASE ==========
-async function seedViaApi() {
-  try {
-    const res = await fetch(`http://localhost:${nextPort}/api/seed`, { method: 'POST' });
-    if (res.ok) {
-      log('Database seeded via API successfully');
-    } else {
-      log('API seed returned status ' + res.status);
-    }
-  } catch (e) {
-    log('API seed failed: ' + e.message);
   }
 }
 
@@ -628,7 +676,7 @@ function createSplashWindow() {
       <div class="title">Attindo</div>
       <div class="subtitle">HR & Payroll System</div>
       <div class="loader"><div class="loader-bar"></div></div>
-      <div class="version">v1.6.0</div>
+      <div class="version">v1.7.0</div>
     </body>
     </html>
   `;
@@ -673,7 +721,7 @@ function createMenu() {
             dialog.showMessageBox(mainWindow, {
               type: 'info', title: 'About Attindo',
               message: 'Attindo - HR & Payroll System',
-              detail: 'Version 1.6.0\n\nProfessional HR & Payroll Management System\n\nLog file: ' + logFile,
+              detail: 'Version 1.7.0\n\nProfessional HR & Payroll Management System\n\nLog file: ' + logFile,
             });
           },
         },
@@ -709,7 +757,7 @@ function createMenu() {
 }
 
 // ========== IPC ==========
-ipcMain.handle('get-app-version', () => app.getVersion());
+ipcMain.handle('get-app-version', () => '1.7.0');
 ipcMain.handle('get-database-path', () => getDatabasePath());
 ipcMain.handle('get-log-path', () => logFile);
 ipcMain.handle('show-open-dialog', async (e, opts) => dialog.showOpenDialog(mainWindow, opts));
@@ -725,11 +773,6 @@ ipcMain.handle('retry-server', async () => {
     showLoadingPage(mainWindow);
     await startNextServer();
     await waitForServer(nextPort, 20);
-    const dbHealthy = await checkDatabaseHealth();
-    if (!dbHealthy) {
-      log('Database unhealthy on retry, attempting prisma db push...');
-      await runPrismaDbPush();
-    }
     mainWindow.loadURL(`http://localhost:${nextPort}`);
     return true;
   } catch (e) {
@@ -748,38 +791,34 @@ app.whenReady().then(async () => {
       splash = createSplashWindow();
     }
 
-    const dbPath = ensureDatabase();
-    log('Database path: ' + dbPath);
-    log('Database URL: ' + getDatabaseUrl());
+    // Step 1: Initialize database
+    log('--- Step 1: Initialize Database ---');
+    const dbInitialized = initializeDatabase();
+    log('Database initialization result: ' + (dbInitialized ? 'SUCCESS' : 'FALLBACK NEEDED'));
 
-    // Run prisma db push to create/update database schema BEFORE starting server
-    if (!isDev) {
-      try {
-        log('Running prisma db push to initialize database schema...');
-        const dbPushResult = await runPrismaDbPush();
-        if (dbPushResult) {
-          log('Database schema initialized successfully');
-        } else {
-          log('⚠️ prisma db push did not complete, database may not have schema');
-        }
-      } catch (dbErr) {
-        log('prisma db push failed: ' + dbErr.message);
-      }
-    }
-
+    // Step 2: Start Next.js server
     let serverReady = false;
 
     if (!isDev) {
+      log('--- Step 2: Start Next.js Server ---');
       try {
-        log('Starting Next.js standalone server...');
         await startNextServer();
-        log('Server started, waiting for HTTP response...');
         await waitForServer(nextPort, 30);
         serverReady = true;
-        log('Next.js server is ready!');
+        log('✅ Next.js server is ready!');
       } catch (serverErr) {
         log('Server start failed: ' + serverErr.message);
-        log('Will try to seed and retry...');
+        // Try one more time after a short delay
+        try {
+          log('Retrying server start in 3 seconds...');
+          await new Promise(r => setTimeout(r, 3000));
+          await startNextServer();
+          await waitForServer(nextPort, 20);
+          serverReady = true;
+          log('✅ Server started on retry!');
+        } catch (retryErr) {
+          log('Server retry also failed: ' + retryErr.message);
+        }
       }
     } else {
       try {
@@ -790,16 +829,13 @@ app.whenReady().then(async () => {
       }
     }
 
+    // Step 3: Auto-initialize database (create default admin if needed)
     if (serverReady) {
-      // Check database health after server is ready
-      const dbHealthy = await checkDatabaseHealth();
-      if (dbHealthy) {
-        log('✅ Database is healthy');
-      } else {
-        log('⚠️ Database health check failed or returned unhealthy');
-      }
+      log('--- Step 3: Auto-initialize Database ---');
+      await autoInitializeDatabase();
     }
 
+    // Step 4: Show main window
     if (splash) splash.close();
     createWindow();
     createMenu();

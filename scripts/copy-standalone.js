@@ -47,11 +47,13 @@ if (fs.existsSync(schemaSrc)) {
   fs.copyFileSync(schemaSrc, path.join(prismaDest, 'schema.prisma'));
 }
 
-// 4. Copy .env file
+// 4. DO NOT copy .env file - it would override DATABASE_URL at runtime
+// The Electron main.js sets DATABASE_URL via environment variable to point
+// to the user's AppData directory. A .env file with a different path would
+// cause "Error code 14: Unable to open the database file"
 const envSrc = path.join(cwd, '.env');
 if (fs.existsSync(envSrc)) {
-  console.log('📄 Copying .env');
-  fs.copyFileSync(envSrc, path.join(standaloneDir, '.env'));
+  console.log('📄 Skipping .env copy (DATABASE_URL is set by Electron at runtime)');
 }
 
 // 5. CRITICAL: Merge root node_modules into .next/node_modules

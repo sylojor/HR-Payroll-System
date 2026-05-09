@@ -178,6 +178,19 @@ export function Login() {
                 )}
               </Button>
             </form>
+
+            {/* Default credentials hint */}
+            <div className="mt-4 bg-teal-50 border border-teal-200 rounded-lg p-3">
+              <p className="text-xs text-teal-700 font-medium mb-1">
+                {isRTL ? '🔑 بيانات الدخول الافتراضية:' : '🔑 Default Credentials:'}
+              </p>
+              <p className="text-xs text-teal-600">
+                {isRTL ? 'المستخدم: admin | كلمة المرور: admin123' : 'Username: admin | Password: admin123'}
+              </p>
+              <p className="text-[10px] text-teal-500 mt-1">
+                {isRTL ? 'يمكنك تغييرها من الإعدادات ← الأمان' : 'You can change this from Settings → Security'}
+              </p>
+            </div>
           </CardContent>
         </Card>
 
