@@ -23,7 +23,7 @@ function log(msg) {
 }
 
 log('=== Attindo Starting ===');
-log('Version: 1.7.0');
+log('Version: 1.8.0');
 log('Mode: ' + (isDev ? 'Development' : 'Production'));
 log('App Path: ' + app.getAppPath());
 log('Resources: ' + process.resourcesPath);
@@ -676,7 +676,7 @@ function createSplashWindow() {
       <div class="title">Attindo</div>
       <div class="subtitle">HR & Payroll System</div>
       <div class="loader"><div class="loader-bar"></div></div>
-      <div class="version">v1.7.0</div>
+      <div class="version">v1.8.0</div>
     </body>
     </html>
   `;
@@ -721,7 +721,7 @@ function createMenu() {
             dialog.showMessageBox(mainWindow, {
               type: 'info', title: 'About Attindo',
               message: 'Attindo - HR & Payroll System',
-              detail: 'Version 1.7.0\n\nProfessional HR & Payroll Management System\n\nLog file: ' + logFile,
+              detail: 'Version 1.8.0\n\nProfessional HR & Payroll Management System\n\nLog file: ' + logFile,
             });
           },
         },
@@ -757,7 +757,7 @@ function createMenu() {
 }
 
 // ========== IPC ==========
-ipcMain.handle('get-app-version', () => '1.7.0');
+ipcMain.handle('get-app-version', () => '1.8.0');
 ipcMain.handle('get-database-path', () => getDatabasePath());
 ipcMain.handle('get-log-path', () => logFile);
 ipcMain.handle('show-open-dialog', async (e, opts) => dialog.showOpenDialog(mainWindow, opts));

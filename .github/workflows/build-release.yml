@@ -9,7 +9,7 @@ on:
       version:
         description: 'Release version (e.g., 1.7.0)'
         required: true
-        default: '1.7.0'
+        default: '1.8.0'
 
 permissions:
   contents: write
@@ -230,13 +230,16 @@ jobs:
             - Payroll Module: `ATT-PAY-2025-PRO-001`
             - Fingerprint Pro: `ATT-FP-2025-PRO-010`
 
-            ## 🆕 What's New in v1.7.0
-            - ✅ Fixed database initialization error (Error code 14)
-            - ✅ Auto-creates default admin user on first launch
-            - ✅ Added backup & restore functionality
-            - ✅ Added password change from Settings
-            - ✅ Added database health check
-            - ✅ Improved Windows installer reliability
+            ## 🆕 What's New in v1.8.0
+            - ✅ Fixed 503 error on /api/setup when database tables don't exist
+            - ✅ Added /api/db-init endpoint for manual/auto database initialization
+            - ✅ Auto-initialization of database schema when tables are missing
+            - ✅ New "Database Setup Required" screen with one-click initialization
+            - ✅ Option to initialize with default admin (admin/admin123) or use setup wizard
+            - ✅ All API endpoints auto-detect and handle missing database tables
+            - ✅ Removed database files from git (auto-created on first run)
+            - ✅ Switched to async exec to prevent server hanging during DB init
+            - ✅ Improved error messages directing users to initialization options
 
             ---
             *Built with ❤️ by Attindo Team*
