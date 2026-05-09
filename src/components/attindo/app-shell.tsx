@@ -121,9 +121,10 @@ export function AppShell() {
     // Fetch license status on mount
     const fetchLicenses = async () => {
       try {
-        const res = await fetch('/api/licenses')
+        const res = await fetch('/api/license')
         if (res.ok) {
-          const licenses = await res.json()
+          const data = await res.json()
+          const licenses = data.licenses || data
           const status = {
             hr: licenses.some((l: { module: string; isActive: boolean }) => l.module === 'HR' && l.isActive),
             payroll: licenses.some((l: { module: string; isActive: boolean }) => l.module === 'PAYROLL' && l.isActive),
