@@ -73,13 +73,14 @@
         "from": "prisma",
         "to": "prisma",
         "filter": ["**/*"]
+      },
+      {
+        "from": "scripts",
+        "to": "scripts",
+        "filter": ["**/*"]
       }
     ],
-    "asar": true,
-    "asarUnpack": [
-      "**/*.node",
-      "**/*.dll"
-    ],
+    "asar": false,
     "publish": {
       "provider": "github",
       "owner": "sylojor",

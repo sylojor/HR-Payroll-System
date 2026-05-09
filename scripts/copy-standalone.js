@@ -6,11 +6,10 @@ const path = require('path');
 
 function copyRecursiveSync(src, dest) {
   if (!fs.existsSync(src)) {
-    console.warn(`Source path does not exist: ${src}`);
+    console.warn(`⚠️ Source not found: ${src}`);
     return;
   }
 
-  // Create destination directory
   if (!fs.existsSync(dest)) {
     fs.mkdirSync(dest, { recursive: true });
   }
@@ -24,69 +23,114 @@ function copyRecursiveSync(src, dest) {
     if (entry.isDirectory()) {
       copyRecursiveSync(srcPath, destPath);
     } else {
-      fs.copyFileSync(srcPath, destPath);
+      try {
+        fs.copyFileSync(srcPath, destPath);
+      } catch (e) {
+        console.warn(`⚠️ Failed to copy ${srcPath}: ${e.message}`);
+      }
     }
   }
 }
 
-console.log('Copying standalone build files...');
+function copyModule(name) {
+  const src = path.join(process.cwd(), 'node_modules', name);
+  const dest = path.join(process.cwd(), '.next', 'standalone', 'node_modules', name);
+  if (fs.existsSync(src)) {
+    console.log(`📦 Copying ${name}`);
+    copyRecursiveSync(src, dest);
+  } else {
+    console.warn(`⚠️ Module not found: ${name}`);
+  }
+}
 
-// Copy .next/static to .next/standalone/.next/static
-const staticSrc = path.join(process.cwd(), '.next', 'static');
-const staticDest = path.join(process.cwd(), '.next', 'standalone', '.next', 'static');
-console.log(`Copying ${staticSrc} -> ${staticDest}`);
+console.log('🔄 Copying standalone build files...');
+
+const cwd = process.cwd();
+
+// 1. Copy .next/static
+const staticSrc = path.join(cwd, '.next', 'static');
+const staticDest = path.join(cwd, '.next', 'standalone', '.next', 'static');
+console.log('📁 Copying .next/static');
 copyRecursiveSync(staticSrc, staticDest);
 
-// Copy public to .next/standalone/public
-const publicSrc = path.join(process.cwd(), 'public');
-const publicDest = path.join(process.cwd(), '.next', 'standalone', 'public');
-console.log(`Copying ${publicSrc} -> ${publicDest}`);
+// 2. Copy public
+const publicSrc = path.join(cwd, 'public');
+const publicDest = path.join(cwd, '.next', 'standalone', 'public');
+console.log('📁 Copying public');
 copyRecursiveSync(publicSrc, publicDest);
 
-// Copy prisma to .next/standalone/prisma
-const prismaSrc = path.join(process.cwd(), 'prisma');
-const prismaDest = path.join(process.cwd(), '.next', 'standalone', 'prisma');
-console.log(`Copying ${prismaSrc} -> ${prismaDest}`);
+// 3. Copy prisma schema
+const prismaSrc = path.join(cwd, 'prisma');
+const prismaDest = path.join(cwd, '.next', 'standalone', 'prisma');
+console.log('📁 Copying prisma');
 copyRecursiveSync(prismaSrc, prismaDest);
 
-// Copy node_modules/.prisma to standalone
-const prismaClientSrc = path.join(process.cwd(), 'node_modules', '.prisma');
-const prismaClientDest = path.join(process.cwd(), '.next', 'standalone', 'node_modules', '.prisma');
-if (fs.existsSync(prismaClientSrc)) {
-  console.log(`Copying ${prismaClientSrc} -> ${prismaClientDest}`);
-  copyRecursiveSync(prismaClientSrc, prismaClientDest);
+// 4. Copy scripts
+const scriptsSrc = path.join(cwd, 'scripts');
+const scriptsDest = path.join(cwd, '.next', 'standalone', 'scripts');
+console.log('📁 Copying scripts');
+copyRecursiveSync(scriptsSrc, scriptsDest);
+
+// 5. Copy .env file
+const envSrc = path.join(cwd, '.env');
+const envDest = path.join(cwd, '.next', 'standalone', '.env');
+if (fs.existsSync(envSrc)) {
+  console.log('📄 Copying .env');
+  fs.copyFileSync(envSrc, envDest);
 }
 
-// Copy node_modules/@prisma to standalone
-const prismaPkgSrc = path.join(process.cwd(), 'node_modules', '@prisma');
-const prismaPkgDest = path.join(process.cwd(), '.next', 'standalone', 'node_modules', '@prisma');
-if (fs.existsSync(prismaPkgSrc)) {
-  console.log(`Copying ${prismaPkgSrc} -> ${prismaPkgDest}`);
-  copyRecursiveSync(prismaPkgSrc, prismaPkgDest);
+// 6. Copy Prisma Client (generated)
+console.log('📦 Copying Prisma client');
+copyModule('.prisma');
+copyModule('@prisma');
+
+// 7. Copy native modules needed for SQLite
+const nativeModules = [
+  'better-sqlite3',
+  'binding',
+  'file-uri-to-path',
+  'prebuild-install',
+  'node-gyp-build',
+  'node-addon-api',
+];
+
+for (const mod of nativeModules) {
+  copyModule(mod);
 }
 
-// Copy better-sqlite3 native module
-const bsqlite3Src = path.join(process.cwd(), 'node_modules', 'better-sqlite3');
-const bsqlite3Dest = path.join(process.cwd(), '.next', 'standalone', 'node_modules', 'better-sqlite3');
-if (fs.existsSync(bsqlite3Src)) {
-  console.log(`Copying ${bsqlite3Src} -> ${bsqlite3Dest}`);
-  copyRecursiveSync(bsqlite3Src, bsqlite3Dest);
+// 8. Verify key files
+const keyFiles = [
+  '.next/standalone/server.js',
+  '.next/standalone/.next/static',
+  '.next/standalone/public',
+  '.next/standalone/prisma/schema.prisma',
+  '.next/standalone/node_modules/.prisma',
+];
+
+console.log('\n🔍 Verifying build...');
+let allGood = true;
+for (const f of keyFiles) {
+  const fullPath = path.join(cwd, f);
+  if (fs.existsSync(fullPath)) {
+    console.log(`  ✅ ${f}`);
+  } else {
+    console.log(`  ❌ ${f} - MISSING`);
+    allGood = false;
+  }
 }
 
-// Copy binding dependency (required by better-sqlite3)
-const bindingSrc = path.join(process.cwd(), 'node_modules', 'binding');
-const bindingDest = path.join(process.cwd(), '.next', 'standalone', 'node_modules', 'binding');
-if (fs.existsSync(bindingSrc)) {
-  console.log(`Copying ${bindingSrc} -> ${bindingDest}`);
-  copyRecursiveSync(bindingSrc, bindingDest);
+// List standalone/node_modules
+const nmDir = path.join(cwd, '.next', 'standalone', 'node_modules');
+if (fs.existsSync(nmDir)) {
+  const dirs = fs.readdirSync(nmDir).filter(d => {
+    return fs.statSync(path.join(nmDir, d)).isDirectory();
+  });
+  console.log(`\n📦 standalone/node_modules contains ${dirs.length} packages`);
+  console.log('  First 20: ' + dirs.slice(0, 20).join(', '));
 }
 
-// Copy file-uri-to-path (required by prisma)
-const fileUriSrc = path.join(process.cwd(), 'node_modules', 'file-uri-to-path');
-const fileUriDest = path.join(process.cwd(), '.next', 'standalone', 'node_modules', 'file-uri-to-path');
-if (fs.existsSync(fileUriSrc)) {
-  console.log(`Copying ${fileUriSrc} -> ${fileUriDest}`);
-  copyRecursiveSync(fileUriSrc, fileUriDest);
+if (allGood) {
+  console.log('\n✅ All files copied successfully!');
+} else {
+  console.log('\n⚠️ Some files are missing - the app may not work correctly');
 }
-
-console.log('✅ All files copied successfully!');

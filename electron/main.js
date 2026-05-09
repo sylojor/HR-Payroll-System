@@ -1,266 +1,229 @@
-const { app, BrowserWindow, globalShortcut, Menu, shell, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, shell, dialog, ipcMain } = require('electron');
 const path = require('path');
-const { spawn, execFile } = require('child_process');
+const { spawn } = require('child_process');
 const fs = require('fs');
 const http = require('http');
 
 let mainWindow = null;
 let nextServer = null;
 const nextPort = 3000;
-
-// Determine if we're in development or production
 const isDev = !app.isPackaged;
 
-// Get the app data directory for database
+// ========== LOGGING ==========
+const logDir = path.join(app.getPath('userData'), 'logs');
+if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+const logFile = path.join(logDir, 'attindo.log');
+const logStream = fs.createWriteStream(logFile, { flags: 'a' });
+
+function log(msg) {
+  const ts = new Date().toISOString();
+  const line = `[${ts}] ${msg}\n`;
+  logStream.write(line);
+  console.log(line.trim());
+}
+
+log('=== Attindo Starting ===');
+log('Version: 1.0.0');
+log('Mode: ' + (isDev ? 'Development' : 'Production'));
+log('App Path: ' + app.getAppPath());
+log('Resources: ' + process.resourcesPath);
+log('User Data: ' + app.getPath('userData'));
+log('Platform: ' + process.platform);
+
+// ========== DATABASE ==========
 function getAppDataDir() {
   const userDataPath = app.getPath('userData');
   const dataDir = path.join(userDataPath, 'data');
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-  }
+  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
   return dataDir;
 }
 
-// Get the database path
 function getDatabasePath() {
   return path.join(getAppDataDir(), 'attindo.db');
 }
 
-// Ensure database exists
 function ensureDatabase() {
   const dbPath = getDatabasePath();
   if (!fs.existsSync(dbPath)) {
     fs.writeFileSync(dbPath, '');
-    console.log('[Attindo] Created new database at:', dbPath);
+    log('Created new database at: ' + dbPath);
   }
   return dbPath;
 }
 
-// Seed database if empty (first run)
-function seedDatabase() {
-  return new Promise((resolve) => {
-    const dbPath = getDatabasePath();
-    const dbSize = fs.statSync(dbPath).size;
-
-    // If database has data, skip seeding
-    if (dbSize > 1024) {
-      console.log('[Attindo] Database already has data, skipping seed');
-      resolve();
-      return;
-    }
-
-    console.log('[Attindo] First run detected, seeding database...');
-
-    const env = {
-      ...process.env,
-      DATABASE_URL: `file:${dbPath}`,
-    };
-
-    // Try to find the seed script
-    const possibleSeedPaths = isDev
-      ? [path.join(process.cwd(), 'scripts', 'seed.ts')]
-      : [
-          path.join(process.resourcesPath, 'scripts', 'seed.ts'),
-          path.join(process.resourcesPath, 'next-standalone', 'scripts', 'seed.ts'),
-        ];
-
-    let seedPath = null;
-    for (const p of possibleSeedPaths) {
-      if (fs.existsSync(p)) {
-        seedPath = p;
-        break;
-      }
-    }
-
-    if (!seedPath) {
-      console.warn('[Attindo] Seed script not found, skipping seed');
-      resolve();
-      return;
-    }
-
-    // Run with bun or tsx
-    const cmd = process.platform === 'win32' ? 'npx' : 'npx';
-    const child = spawn(cmd, ['tsx', seedPath], {
-      env,
-      shell: true,
-      stdio: 'pipe',
-      cwd: isDev ? process.cwd() : path.dirname(seedPath),
-    });
-
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (data) => {
-      stdout += data.toString();
-      console.log('[Seed]', data.toString());
-    });
-    child.stderr.on('data', (data) => {
-      stderr += data.toString();
-      console.error('[Seed Error]', data.toString());
-    });
-
-    child.on('close', (code) => {
-      if (code === 0) {
-        console.log('[Attindo] Database seeded successfully');
-      } else {
-        console.warn('[Attindo] Seed failed with code', code, stderr);
-      }
-      resolve();
-    });
-
-    // Timeout after 30 seconds
-    setTimeout(() => {
-      child.kill();
-      resolve();
-    }, 30000);
-  });
+// Convert Windows path to proper file:// URI for Prisma
+function getDatabaseUrl() {
+  const dbPath = getDatabasePath();
+  // On Windows, convert backslashes to forward slashes and ensure proper file:// format
+  let normalizedPath = dbPath.replace(/\\/g, '/');
+  // Ensure absolute path starts with / on Windows (file:///C:/...)
+  if (!normalizedPath.startsWith('/')) {
+    normalizedPath = '/' + normalizedPath;
+  }
+  return 'file:' + normalizedPath;
 }
 
-// Run Prisma db push
-function initDatabase() {
-  return new Promise((resolve) => {
-    const dbPath = getDatabasePath();
+// ========== STANDALONE SERVER SETUP ==========
+function findServerPath() {
+  // Possible locations for the Next.js standalone server
+  const possiblePaths = [
+    path.join(process.resourcesPath, 'next-standalone', 'server.js'),
+    path.join(process.resourcesPath, 'app', 'next-standalone', 'server.js'),
+    path.join(__dirname, '..', 'next-standalone', 'server.js'),
+    path.join(__dirname, '..', '..', 'next-standalone', 'server.js'),
+  ];
 
-    if (isDev) {
-      // In dev mode, just make sure the database file exists
-      ensureDatabase();
-      resolve();
-      return;
-    }
-
-    // In production, use prisma db push with the bundled schema
-    const prismaSchemaPath = path.join(process.resourcesPath, 'prisma', 'schema.prisma');
-
-    if (!fs.existsSync(prismaSchemaPath)) {
-      console.warn('[Attindo] Prisma schema not found, skipping db push');
-      ensureDatabase();
-      resolve();
-      return;
-    }
-
-    const env = {
-      ...process.env,
-      DATABASE_URL: `file:${dbPath}`,
-    };
-
-    const prismaBin = path.join(
-      process.resourcesPath,
-      'next-standalone',
-      'node_modules',
-      '.bin',
-      'prisma'
-    );
-
-    const cmd = `"${prismaBin}" db push --schema="${prismaSchemaPath}" --skip-generate`;
-    console.log('[Attindo] Running:', cmd);
-
-    const child = spawn(cmd, [], {
-      env,
-      shell: true,
-      stdio: 'pipe',
-    });
-
-    let stderr = '';
-    child.stderr.on('data', (data) => {
-      stderr += data.toString();
-    });
-    child.stdout.on('data', (data) => {
-      console.log('[Prisma]', data.toString());
-    });
-
-    child.on('close', (code) => {
-      if (code === 0) {
-        console.log('[Attindo] Database schema applied successfully');
-      } else {
-        console.warn('[Attindo] Prisma push failed, continuing:', stderr);
-        ensureDatabase();
-      }
-      resolve();
-    });
-
-    setTimeout(() => {
-      child.kill();
-      resolve();
-    }, 20000);
-  });
+  for (const p of possiblePaths) {
+    log('Checking server path: ' + p + ' -> ' + (fs.existsSync(p) ? 'EXISTS' : 'NOT FOUND'));
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
 }
 
-// Start Next.js server
+function findStandaloneDir() {
+  const possibleDirs = [
+    path.join(process.resourcesPath, 'next-standalone'),
+    path.join(process.resourcesPath, 'app', 'next-standalone'),
+    path.join(__dirname, '..', 'next-standalone'),
+    path.join(__dirname, '..', '..', 'next-standalone'),
+  ];
+
+  for (const d of possibleDirs) {
+    if (fs.existsSync(d)) return d;
+  }
+  return null;
+}
+
+// ========== NEXT.JS SERVER ==========
 function startNextServer() {
   return new Promise((resolve, reject) => {
-    const dbPath = getDatabasePath();
+    if (isDev) {
+      log('Dev mode - assuming Next.js is running on port ' + nextPort);
+      resolve(nextPort);
+      return;
+    }
+
+    const serverPath = findServerPath();
+    const standaloneDir = findStandaloneDir();
+
+    if (!serverPath || !standaloneDir) {
+      log('ERROR: Could not find Next.js standalone server!');
+      log('Searched paths:');
+      log('  serverPath: ' + serverPath);
+      log('  standaloneDir: ' + standaloneDir);
+      reject(new Error('Next.js server not found'));
+      return;
+    }
+
+    log('Server path: ' + serverPath);
+    log('Standalone dir: ' + standaloneDir);
+
+    // List standalone dir contents for debugging
+    try {
+      const contents = fs.readdirSync(standaloneDir);
+      log('Standalone contents: ' + contents.join(', '));
+    } catch (e) {
+      log('Cannot read standalone dir: ' + e.message);
+    }
+
+    const dbUrl = getDatabaseUrl();
+    log('Database URL: ' + dbUrl);
+
     const env = {
       ...process.env,
-      DATABASE_URL: `file:${dbPath}`,
+      DATABASE_URL: dbUrl,
       PORT: String(nextPort),
-      HOSTNAME: 'localhost',
+      HOSTNAME: '0.0.0.0',
       NODE_ENV: 'production',
     };
 
-    if (isDev) {
-      console.log('[Attindo] Development mode - assuming Next.js is running on port', nextPort);
-      resolve(nextPort);
-      return;
+    log('Starting server with env PORT=' + nextPort + ' HOSTNAME=0.0.0.0');
+
+    try {
+      nextServer = spawn('node', [serverPath], {
+        env,
+        cwd: standaloneDir,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+
+      let serverStarted = false;
+
+      nextServer.stdout.on('data', (data) => {
+        const output = data.toString();
+        log('[Next.js stdout] ' + output.trim());
+
+        // Detect when server is ready
+        if (!serverStarted && (output.includes('Ready') || output.includes('started') || output.includes('Listening'))) {
+          serverStarted = true;
+          resolve(nextPort);
+        }
+      });
+
+      nextServer.stderr.on('data', (data) => {
+        const output = data.toString();
+        log('[Next.js stderr] ' + output.trim());
+      });
+
+      nextServer.on('error', (err) => {
+        log('[Next.js spawn error] ' + err.message);
+        reject(err);
+      });
+
+      nextServer.on('close', (code, signal) => {
+        log('[Next.js] Server exited with code=' + code + ' signal=' + signal);
+        nextServer = null;
+        if (!serverStarted) {
+          reject(new Error('Server exited before becoming ready with code ' + code));
+        }
+      });
+
+      // Timeout - if server doesn't signal ready in 45s, try HTTP check
+      setTimeout(() => {
+        if (!serverStarted) {
+          log('Server startup timeout, checking if it responds to HTTP...');
+          checkServerHttp(nextPort).then(() => {
+            serverStarted = true;
+            resolve(nextPort);
+          }).catch(() => {
+            log('Server not responding after timeout');
+            reject(new Error('Server did not start in time'));
+          });
+        }
+      }, 45000);
+
+    } catch (err) {
+      log('Failed to spawn server: ' + err.message);
+      reject(err);
     }
-
-    // In production, start the standalone Next.js server
-    const serverPath = path.join(process.resourcesPath, 'next-standalone', 'server.js');
-    console.log('[Attindo] Starting Next.js server from:', serverPath);
-
-    if (!fs.existsSync(serverPath)) {
-      console.error('[Attindo] Server file not found at:', serverPath);
-      reject(new Error('Server file not found'));
-      return;
-    }
-
-    nextServer = spawn('node', [serverPath], {
-      env,
-      cwd: path.join(process.resourcesPath, 'next-standalone'),
-      stdio: 'pipe',
-    });
-
-    nextServer.stdout.on('data', (data) => {
-      const output = data.toString();
-      console.log('[Next.js]', output.trim());
-    });
-
-    nextServer.stderr.on('data', (data) => {
-      console.error('[Next.js Error]', data.toString().trim());
-    });
-
-    nextServer.on('close', (code) => {
-      console.log('[Next.js] Server exited with code', code);
-    });
-
-    // Timeout
-    setTimeout(() => {
-      resolve(nextPort);
-    }, 30000);
   });
 }
 
-// Wait for server to be ready
-function waitForServer(port, maxRetries = 30) {
+function checkServerHttp(port) {
+  return new Promise((resolve, reject) => {
+    const req = http.get(`http://localhost:${port}`, (res) => {
+      resolve(true);
+    });
+    req.on('error', reject);
+    req.setTimeout(3000, () => {
+      req.destroy();
+      reject(new Error('HTTP check timeout'));
+    });
+  });
+}
+
+function waitForServer(port, maxRetries = 40) {
   return new Promise((resolve, reject) => {
     let retries = 0;
     const check = () => {
-      const req = http.get(`http://localhost:${port}`, (res) => {
+      checkServerHttp(port).then(() => {
+        log('Server is responding on port ' + port);
         resolve(true);
-      });
-      req.on('error', () => {
+      }).catch(() => {
         retries++;
         if (retries >= maxRetries) {
-          reject(new Error('Server did not start in time'));
+          reject(new Error('Server did not respond after ' + maxRetries + ' retries'));
         } else {
-          setTimeout(check, 1000);
-        }
-      });
-      req.setTimeout(2000, () => {
-        req.destroy();
-        retries++;
-        if (retries >= maxRetries) {
-          reject(new Error('Server did not start in time'));
-        } else {
-          setTimeout(check, 1000);
+          setTimeout(check, 1500);
         }
       });
     };
@@ -268,7 +231,227 @@ function waitForServer(port, maxRetries = 30) {
   });
 }
 
-// Create splash window
+// ========== SEED DATABASE ==========
+function seedDatabase() {
+  return new Promise((resolve) => {
+    const dbPath = getDatabasePath();
+
+    try {
+      const dbSize = fs.statSync(dbPath).size;
+      if (dbSize > 10000) {
+        log('Database already has data (' + dbSize + ' bytes), skipping seed');
+        resolve();
+        return;
+      }
+    } catch (e) {
+      log('Cannot check database size: ' + e.message);
+    }
+
+    log('First run detected, seeding database...');
+
+    // Find seed script
+    const possibleSeedPaths = isDev
+      ? [path.join(process.cwd(), 'scripts', 'seed.ts')]
+      : [
+          path.join(process.resourcesPath, 'next-standalone', 'scripts', 'seed.ts'),
+          path.join(process.resourcesPath, 'scripts', 'seed.ts'),
+        ];
+
+    let seedPath = null;
+    for (const p of possibleSeedPaths) {
+      if (fs.existsSync(p)) {
+        seedPath = p;
+        log('Found seed script at: ' + p);
+        break;
+      }
+    }
+
+    if (!seedPath) {
+      log('Seed script not found, will rely on API seed endpoint');
+      // Try to seed via HTTP after server starts
+      resolve();
+      return;
+    }
+
+    const dbUrl = getDatabaseUrl();
+    const env = {
+      ...process.env,
+      DATABASE_URL: dbUrl,
+    };
+
+    const child = spawn('npx', ['tsx', seedPath], {
+      env,
+      shell: true,
+      stdio: 'pipe',
+      cwd: path.dirname(seedPath),
+    });
+
+    child.stdout.on('data', (data) => { log('[Seed] ' + data.toString().trim()); });
+    child.stderr.on('data', (data) => { log('[Seed err] ' + data.toString().trim()); });
+
+    child.on('close', (code) => {
+      log('Seed completed with code ' + code);
+      resolve();
+    });
+
+    setTimeout(() => { child.kill(); resolve(); }, 30000);
+  });
+}
+
+// Seed via API endpoint after server is running
+async function seedViaApi() {
+  try {
+    const res = await fetch(`http://localhost:${nextPort}/api/seed`, { method: 'POST' });
+    if (res.ok) {
+      log('Database seeded via API successfully');
+    } else {
+      log('API seed returned status ' + res.status);
+    }
+  } catch (e) {
+    log('API seed failed: ' + e.message);
+  }
+}
+
+// ========== ERROR PAGE ==========
+function showErrorPage(window, errorMsg) {
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+          width: 100vw; height: 100vh;
+          background: #0F172A;
+          display: flex; align-items: center; justify-content: center;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+          color: #E2E8F0;
+          overflow: hidden;
+        }
+        .container {
+          text-align: center;
+          max-width: 500px;
+          padding: 40px;
+        }
+        .icon {
+          font-size: 60px;
+          margin-bottom: 20px;
+        }
+        h1 { font-size: 24px; margin-bottom: 12px; color: #F87171; }
+        p { font-size: 14px; color: #94A3B8; margin-bottom: 20px; line-height: 1.6; }
+        .error-box {
+          background: #1E293B;
+          border: 1px solid #334155;
+          border-radius: 8px;
+          padding: 16px;
+          text-align: left;
+          font-family: 'Consolas', 'Courier New', monospace;
+          font-size: 12px;
+          color: #FB923C;
+          max-height: 150px;
+          overflow-y: auto;
+          word-break: break-all;
+        }
+        .retry-btn {
+          margin-top: 20px;
+          padding: 12px 32px;
+          background: linear-gradient(135deg, #14B8A6, #0D9488);
+          color: white;
+          border: none;
+          border-radius: 8px;
+          font-size: 16px;
+          cursor: pointer;
+          transition: opacity 0.2s;
+        }
+        .retry-btn:hover { opacity: 0.9; }
+        .log-path {
+          margin-top: 16px;
+          font-size: 11px;
+          color: #475569;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="icon">⚠️</div>
+        <h1>Server Failed to Start</h1>
+        <p>The application server could not be started. This might be a temporary issue.</p>
+        <div class="error-box">${errorMsg.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+        <button class="retry-btn" onclick="window.__retry()">🔄 Retry</button>
+        <div class="log-path">Log file: ${logFile.replace(/\\/g, '\\\\')}</div>
+      </div>
+    </body>
+    </html>
+  `;
+  window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+}
+
+// ========== LOADING PAGE ==========
+function showLoadingPage(window) {
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+          width: 100vw; height: 100vh;
+          background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
+          display: flex; align-items: center; justify-content: center;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+          color: white;
+          overflow: hidden;
+        }
+        .container { text-align: center; }
+        .logo {
+          width: 80px; height: 80px;
+          background: linear-gradient(135deg, #14B8A6, #0D9488);
+          border-radius: 20px;
+          display: flex; align-items: center; justify-content: center;
+          font-size: 40px; font-weight: bold;
+          margin: 0 auto 20px;
+          box-shadow: 0 8px 32px rgba(20,184,166,0.3);
+          animation: pulse 2s ease-in-out infinite;
+        }
+        @keyframes pulse {
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(1.05); }
+        }
+        .title { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
+        .subtitle { font-size: 14px; color: #94A3B8; margin-bottom: 30px; }
+        .loader {
+          width: 200px; height: 4px;
+          background: #334155; border-radius: 2px;
+          overflow: hidden; margin: 0 auto;
+        }
+        .loader-bar {
+          width: 40%; height: 100%;
+          background: linear-gradient(90deg, #14B8A6, #0D9488);
+          border-radius: 2px;
+          animation: loading 1.5s ease-in-out infinite;
+        }
+        @keyframes loading {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(350%); }
+        }
+        .status { margin-top: 16px; font-size: 12px; color: #64748B; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="logo">A</div>
+        <div class="title">Attindo</div>
+        <div class="subtitle">HR & Payroll System</div>
+        <div class="loader"><div class="loader-bar"></div></div>
+        <div class="status" id="status">Starting server...</div>
+      </div>
+    </body>
+    </html>
+  `;
+  window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+}
+
+// ========== SPLASH WINDOW ==========
 function createSplashWindow() {
   const splash = new BrowserWindow({
     width: 500,
@@ -277,6 +460,7 @@ function createSplashWindow() {
     frame: false,
     alwaysOnTop: true,
     resizable: false,
+    center: true,
   });
 
   const splashHTML = `
@@ -286,52 +470,30 @@ function createSplashWindow() {
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-          width: 500px;
-          height: 350px;
+          width: 500px; height: 350px;
           background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
+          display: flex; flex-direction: column;
+          align-items: center; justify-content: center;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-          color: white;
-          border-radius: 16px;
-          overflow: hidden;
+          color: white; border-radius: 16px; overflow: hidden;
         }
         .logo {
-          width: 80px;
-          height: 80px;
+          width: 80px; height: 80px;
           background: linear-gradient(135deg, #14B8A6, #0D9488);
           border-radius: 20px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 40px;
-          font-weight: bold;
+          display: flex; align-items: center; justify-content: center;
+          font-size: 40px; font-weight: bold;
           margin-bottom: 20px;
-          box-shadow: 0 8px 32px rgba(20, 184, 166, 0.3);
+          box-shadow: 0 8px 32px rgba(20,184,166,0.3);
         }
-        .title {
-          font-size: 28px;
-          font-weight: 700;
-          margin-bottom: 8px;
-          letter-spacing: -0.5px;
-        }
-        .subtitle {
-          font-size: 14px;
-          color: #94A3B8;
-          margin-bottom: 30px;
-        }
+        .title { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
+        .subtitle { font-size: 14px; color: #94A3B8; margin-bottom: 30px; }
         .loader {
-          width: 200px;
-          height: 4px;
-          background: #334155;
-          border-radius: 2px;
-          overflow: hidden;
+          width: 200px; height: 4px;
+          background: #334155; border-radius: 2px; overflow: hidden;
         }
         .loader-bar {
-          width: 40%;
-          height: 100%;
+          width: 40%; height: 100%;
           background: linear-gradient(90deg, #14B8A6, #0D9488);
           border-radius: 2px;
           animation: loading 1.5s ease-in-out infinite;
@@ -340,11 +502,7 @@ function createSplashWindow() {
           0% { transform: translateX(-100%); }
           100% { transform: translateX(350%); }
         }
-        .version {
-          margin-top: 20px;
-          font-size: 11px;
-          color: #475569;
-        }
+        .version { margin-top: 20px; font-size: 11px; color: #475569; }
       </style>
     </head>
     <body>
@@ -361,7 +519,7 @@ function createSplashWindow() {
   return splash;
 }
 
-// Create main window
+// ========== MAIN WINDOW ==========
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -377,32 +535,21 @@ function createWindow() {
     },
     show: false,
     backgroundColor: '#0F172A',
-    titleBarStyle: 'default',
   });
 
-  const url = `http://localhost:${nextPort}`;
-  mainWindow.loadURL(url);
-
-  mainWindow.once('ready-to-show', () => {
-    mainWindow.show();
-    mainWindow.focus();
-  });
+  // Show loading page first
+  showLoadingPage(mainWindow);
+  mainWindow.show();
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
   });
 
-  if (isDev) {
-    mainWindow.webContents.openDevTools();
-  }
-
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-  });
+  mainWindow.on('closed', () => { mainWindow = null; });
 }
 
-// Create application menu
+// ========== MENU ==========
 function createMenu() {
   const template = [
     {
@@ -415,11 +562,12 @@ function createMenu() {
               type: 'info',
               title: 'About Attindo',
               message: 'Attindo - HR & Payroll System',
-              detail:
-                'Version 1.0.0\n\nProfessional HR & Payroll Management System with ZK Fingerprint Support\n\n© 2025 Attindo. All rights reserved.',
+              detail: 'Version 1.0.0\n\nProfessional HR & Payroll Management System\n\nLog file: ' + logFile,
             });
           },
         },
+        { type: 'separator' },
+        { label: 'Open Log Folder', click: () => { shell.showItemInFolder(logFile); } },
         { type: 'separator' },
         { role: 'quit', label: 'Quit Attindo' },
       ],
@@ -427,142 +575,157 @@ function createMenu() {
     {
       label: 'Edit',
       submenu: [
-        { role: 'undo', label: 'Undo' },
-        { role: 'redo', label: 'Redo' },
+        { role: 'undo' }, { role: 'redo' },
         { type: 'separator' },
-        { role: 'cut', label: 'Cut' },
-        { role: 'copy', label: 'Copy' },
-        { role: 'paste', label: 'Paste' },
-        { role: 'selectAll', label: 'Select All' },
+        { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
       ],
     },
     {
       label: 'View',
       submenu: [
-        { role: 'reload', label: 'Reload' },
-        { role: 'forceReload', label: 'Force Reload' },
-        { role: 'toggleDevTools', label: 'Developer Tools' },
+        { role: 'reload' }, { role: 'forceReload' },
+        { role: 'toggleDevTools' },
         { type: 'separator' },
-        { role: 'resetZoom', label: 'Reset Zoom' },
-        { role: 'zoomIn', label: 'Zoom In' },
-        { role: 'zoomOut', label: 'Zoom Out' },
+        { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' },
         { type: 'separator' },
-        { role: 'togglefullscreen', label: 'Full Screen' },
+        { role: 'togglefullscreen' },
       ],
     },
     {
       label: 'Window',
       submenu: [
-        { role: 'minimize', label: 'Minimize' },
-        { role: 'zoom', label: 'Zoom' },
-        { role: 'close', label: 'Close' },
+        { role: 'minimize' }, { role: 'zoom' }, { role: 'close' },
       ],
     },
   ];
 
-  const menu = Menu.buildFromTemplate(template);
-  Menu.setApplicationMenu(menu);
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-// IPC Handlers
+// ========== IPC ==========
 ipcMain.handle('get-app-version', () => app.getVersion());
 ipcMain.handle('get-database-path', () => getDatabasePath());
-ipcMain.handle('show-open-dialog', async (event, options) => {
-  return dialog.showOpenDialog(mainWindow, options);
-});
-ipcMain.handle('show-save-dialog', async (event, options) => {
-  return dialog.showSaveDialog(mainWindow, options);
-});
+ipcMain.handle('get-log-path', () => logFile);
+ipcMain.handle('show-open-dialog', async (e, opts) => dialog.showOpenDialog(mainWindow, opts));
+ipcMain.handle('show-save-dialog', async (e, opts) => dialog.showSaveDialog(mainWindow, opts));
 ipcMain.handle('window-minimize', () => mainWindow?.minimize());
 ipcMain.handle('window-maximize', () => {
-  if (mainWindow?.isMaximized()) {
-    mainWindow.unmaximize();
-  } else {
-    mainWindow?.maximize();
-  }
+  if (mainWindow?.isMaximized()) mainWindow.unmaximize();
+  else mainWindow?.maximize();
 });
 ipcMain.handle('window-close', () => mainWindow?.close());
+ipcMain.handle('retry-server', async () => {
+  try {
+    await startNextServer();
+    await waitForServer(nextPort);
+    mainWindow.loadURL(`http://localhost:${nextPort}`);
+    return true;
+  } catch (e) {
+    return false;
+  }
+});
 
-// App lifecycle
+// ========== APP LIFECYCLE ==========
 app.whenReady().then(async () => {
   let splash = null;
 
   try {
-    // Show splash screen in production
     if (!isDev) {
       splash = createSplashWindow();
     }
 
-    console.log('[Attindo] Starting Attindo HR & Payroll System...');
-    console.log('[Attindo] Mode:', isDev ? 'Development' : 'Production');
-    console.log('[Attindo] App Path:', app.getAppPath());
-    console.log('[Attindo] Resources:', process.resourcesPath);
-
-    // Ensure database directory exists
+    // Ensure database exists
     const dbPath = ensureDatabase();
-    console.log('[Attindo] Database path:', dbPath);
-
-    // Initialize database schema
-    await initDatabase();
-
-    // Seed database if first run
-    await seedDatabase();
+    log('Database path: ' + dbPath);
+    log('Database URL: ' + getDatabaseUrl());
 
     // Start Next.js server
+    let serverReady = false;
+
     if (!isDev) {
-      await startNextServer();
       try {
-        await waitForServer(nextPort);
-        console.log('[Attindo] Next.js server is ready');
-      } catch (e) {
-        console.warn('[Attindo] Server readiness check timed out, trying to load anyway...');
+        log('Starting Next.js standalone server...');
+        await startNextServer();
+        log('Server started, waiting for HTTP response...');
+        await waitForServer(nextPort, 30);
+        serverReady = true;
+        log('Next.js server is ready!');
+      } catch (serverErr) {
+        log('Server start failed: ' + serverErr.message);
+        log('Will try to seed and retry...');
       }
     } else {
-      // In dev mode, wait for existing server
       try {
         await waitForServer(nextPort, 5);
+        serverReady = true;
       } catch (e) {
-        console.warn('[Attindo] Next.js dev server not detected. Make sure to run "bun run dev" separately.');
+        log('Dev server not detected');
       }
     }
 
-    // Close splash and create main window
-    if (splash) {
-      splash.close();
+    // Seed database
+    if (serverReady) {
+      await seedViaApi();
     }
+
+    // Close splash, create main window
+    if (splash) splash.close();
     createWindow();
     createMenu();
 
-    app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) {
-        createWindow();
-      }
+    if (serverReady) {
+      // Load the actual Next.js app
+      log('Loading http://localhost:' + nextPort);
+      mainWindow.loadURL(`http://localhost:${nextPort}`);
+    } else {
+      // Show error page with retry option
+      log('Showing error page - server not ready');
+      showErrorPage(mainWindow, 'The application server failed to start.\n\nPlease check the log file for details.\n\nLog: ' + logFile);
+    }
+
+    mainWindow.once('ready-to-show', () => {
+      mainWindow.show();
+      mainWindow.focus();
     });
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+
   } catch (error) {
-    console.error('[Attindo] Failed to start:', error);
+    log('Fatal error: ' + error.message + '\n' + error.stack);
     if (splash) splash.close();
+
+    // Show error in a dialog
     dialog.showErrorBox(
       'Attindo - Startup Error',
-      `Failed to start Attindo: ${error.message}\n\nPlease try reinstalling the application.`
+      `Failed to start: ${error.message}\n\nLog file: ${logFile}`
     );
-    app.quit();
+
+    // Try to create window with error page anyway
+    if (!mainWindow) {
+      createWindow();
+      createMenu();
+      showErrorPage(mainWindow, error.message + '\n\nStack: ' + error.stack);
+    }
+
+    // Don't quit - let user see the error and retry
   }
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
+  if (process.platform !== 'darwin') app.quit();
 });
 
 app.on('before-quit', () => {
   if (nextServer) {
-    console.log('[Attindo] Stopping Next.js server...');
+    log('Stopping Next.js server...');
     nextServer.kill();
     nextServer = null;
   }
+  logStream.end();
 });
 
 process.on('uncaughtException', (error) => {
-  console.error('[Attindo] Uncaught exception:', error);
+  log('Uncaught exception: ' + error.message + '\n' + error.stack);
 });
