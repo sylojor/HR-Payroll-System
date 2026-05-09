@@ -1,48 +1,19 @@
 // Cross-platform copy script for Next.js standalone build
-// Optimized for minimum installer size
+// Uses _deps/ instead of node_modules/ to avoid electron-builder pruning
 
 const fs = require('fs');
 const path = require('path');
 
 // Files/patterns to skip to reduce size
 const SKIP_PATTERNS = [
-  /\.md$/i,
-  /\.tsbuildinfo$/i,
-  /\.map$/i,
-  /CHANGELOG/i,
-  /LICENSE/i,
-  /README/i,
-  /\.github$/i,
-  /__tests__/i,
-  /__test__/i,
-  /\.spec\./i,
-  /\.test\./i,
-  /tsconfig\.json$/i,
-  /\.d\.ts$/i,
-  /eslint/i,
-  /prettier/i,
-  /\.ts$/i, // Skip TypeScript source files (only need compiled JS)
-  /Makefile$/i,
-  /Dockerfile$/i,
-  /\.dockerignore$/i,
-  /\.npmignore$/i,
-  /\.gitignore$/i,
-  /\.editorconfig$/i,
-  /\.babelrc/i,
-  /\.eslintrc/i,
-  /\.prettierrc/i,
-  /node_modules\/\.cache/i,
-  /\.pnpm/i,
+  /\.md$/i, /\.tsbuildinfo$/i, /\.map$/i, /CHANGELOG/i,
+  /LICENSE/i, /README/i, /\.github$/i, /__tests__/i,
+  /\.spec\./i, /\.test\./i, /tsconfig\.json$/i,
+  /\.d\.ts$/i, /eslint/i, /prettier/i, /\.ts$/i,
+  /Makefile$/i, /Dockerfile$/i, /\.npmignore$/i,
+  /\.gitignore$/i, /\.editorconfig$/i, /\.babelrc/i,
+  /\.eslintrc/i, /\.prettierrc/i, /node_modules\/\.cache/i,
 ];
-
-// Only copy specific subdirectories from packages (not entire package with tests/docs)
-const MINIMAL_COPY_PACKAGES = {
-  'next': ['dist', 'package.json'],
-  'react': ['cjs', 'package.json'],
-  'react-dom': ['cjs', 'package.json', 'index.js'],
-  'styled-jsx': ['dist', 'package.json', 'index.js', 'server.js', 'style.js'],
-  'caniuse-lite': ['data.json', 'dist', 'package.json'],
-};
 
 function shouldSkip(filePath) {
   const basename = path.basename(filePath);
@@ -68,99 +39,76 @@ function copyRecursiveSync(src, dest, skipPatterns = true) {
     const destPath = path.join(dest, entry.name);
 
     if (entry.isDirectory()) {
-      // Skip certain directories
-      if (skipPatterns && /^(test|tests|__tests__|__test__|docs|doc|example|examples|\.github|src)$/i.test(entry.name)) {
+      if (skipPatterns && /^(test|tests|__tests__|docs|doc|example|examples|\.github|src)$/i.test(entry.name)) {
         continue;
       }
       copyRecursiveSync(srcPath, destPath, skipPatterns);
     } else {
       try {
         fs.copyFileSync(srcPath, destPath);
-      } catch (e) {
-        // Ignore errors for individual files
-      }
+      } catch (e) {}
     }
   }
 }
 
-function copyModule(name) {
+// Copy module to _deps/ instead of node_modules/ to avoid electron-builder pruning
+function copyModuleToDeps(name) {
   const src = path.join(process.cwd(), 'node_modules', name);
-  const dest = path.join(process.cwd(), '.next', 'standalone', 'node_modules', name);
+  const dest = path.join(process.cwd(), '.next', 'standalone', '_deps', name);
   if (fs.existsSync(src)) {
-    // Check if we should do a minimal copy
-    if (MINIMAL_COPY_PACKAGES[name]) {
-      console.log(`📦 Copying ${name} (minimal)`);
-      const items = MINIMAL_COPY_PACKAGES[name];
-      if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true });
-      for (const item of items) {
-        const srcItem = path.join(src, item);
-        const destItem = path.join(dest, item);
-        if (fs.existsSync(srcItem)) {
-          if (fs.statSync(srcItem).isDirectory()) {
-            copyRecursiveSync(srcItem, destItem, true);
-          } else {
-            fs.copyFileSync(srcItem, destItem);
-          }
-        }
-      }
-    } else {
-      console.log(`📦 Copying ${name}`);
-      copyRecursiveSync(src, dest, true);
-    }
+    console.log(`📦 Copying ${name} to _deps/`);
+    copyRecursiveSync(src, dest, true);
   } else {
     console.warn(`⚠️ Module not found: ${name}`);
   }
 }
 
-// Ensure a module exists in standalone, copy from project if missing
-function ensureModule(name) {
-  const dest = path.join(process.cwd(), '.next', 'standalone', 'node_modules', name);
-  if (!fs.existsSync(dest)) {
-    console.log(`📦 Module ${name} missing in standalone, copying from project`);
-    copyModule(name);
-  } else {
-    console.log(`✅ Module ${name} already exists in standalone`);
+// Ensure a module exists in standalone, copy to _deps/ if missing everywhere
+function ensureModuleInDeps(name) {
+  const standaloneDir = path.join(process.cwd(), '.next', 'standalone');
+  // Check if module exists in any node_modules location
+  const possibleLocations = [
+    path.join(standaloneDir, 'node_modules', name),
+    path.join(standaloneDir, '.next', 'node_modules', name),
+    path.join(standaloneDir, '_deps', name),
+  ];
+
+  for (const loc of possibleLocations) {
+    if (fs.existsSync(loc)) {
+      console.log(`✅ Module ${name} already exists at: ${loc}`);
+      return;
+    }
   }
+
+  // Module not found anywhere, copy it to _deps
+  console.log(`📦 Module ${name} missing, copying to _deps/`);
+  copyModuleToDeps(name);
 }
 
-console.log('🔄 Copying standalone build files (optimized)...');
+console.log('🔄 Copying standalone build files (optimized with _deps/)...\n');
 
 const cwd = process.cwd();
 
 // 1. Copy .next/static
-const staticSrc = path.join(cwd, '.next', 'static');
-const staticDest = path.join(cwd, '.next', 'standalone', '.next', 'static');
 console.log('📁 Copying .next/static');
-copyRecursiveSync(staticSrc, staticDest, false); // Don't skip anything for static
+copyRecursiveSync(path.join(cwd, '.next', 'static'), path.join(cwd, '.next', 'standalone', '.next', 'static'), false);
 
 // 2. Copy public
-const publicSrc = path.join(cwd, 'public');
-const publicDest = path.join(cwd, '.next', 'standalone', 'public');
 console.log('📁 Copying public');
-copyRecursiveSync(publicSrc, publicDest, false);
+copyRecursiveSync(path.join(cwd, 'public'), path.join(cwd, '.next', 'standalone', 'public'), false);
 
-// 3. Copy prisma schema (only schema, not migrations)
-const prismaSrc = path.join(cwd, 'prisma');
-const prismaDest = path.join(cwd, '.next', 'standalone', 'prisma');
+// 3. Copy prisma schema
 console.log('📁 Copying prisma');
+const prismaDest = path.join(cwd, '.next', 'standalone', 'prisma');
 if (!fs.existsSync(prismaDest)) fs.mkdirSync(prismaDest, { recursive: true });
-// Only copy schema file and migration lock
-for (const f of ['schema.prisma', 'migration_lock.toml']) {
-  const src = path.join(prismaSrc, f);
+for (const f of ['schema.prisma']) {
+  const src = path.join(cwd, 'prisma', f);
   if (fs.existsSync(src)) {
     fs.copyFileSync(src, path.join(prismaDest, f));
   }
 }
-// Copy migrations directory if exists (needed for prisma)
-const migSrc = path.join(prismaSrc, 'migrations');
-const migDest = path.join(prismaDest, 'migrations');
-if (fs.existsSync(migSrc)) {
-  copyRecursiveSync(migSrc, migDest, true);
-}
 
-// 4. Skip scripts - not needed at runtime
-
-// 5. Copy .env file
+// 4. Copy .env file
 const envSrc = path.join(cwd, '.env');
 const envDest = path.join(cwd, '.next', 'standalone', '.env');
 if (fs.existsSync(envSrc)) {
@@ -168,99 +116,61 @@ if (fs.existsSync(envSrc)) {
   fs.copyFileSync(envSrc, envDest);
 }
 
-// 6. Copy Prisma Client (generated) - only runtime files
-console.log('📦 Copying Prisma client');
-copyModule('.prisma');
-copyModule('@prisma');
+// 5. Copy extra modules to _deps/ (NOT node_modules/ - electron-builder prunes those!)
+console.log('\n📦 Copying extra modules to _deps/ (avoids electron-builder pruning)...');
 
-// 7. Copy native modules needed for SQLite
-const nativeModules = [
-  'better-sqlite3',
-  'file-uri-to-path',
-  'node-addon-api',
-  'node-gyp-build',
-  'binding',
-];
+// Prisma Client - always needed
+copyModuleToDeps('.prisma');
+copyModuleToDeps('@prisma');
 
+// Native modules for SQLite
+const nativeModules = ['better-sqlite3', 'file-uri-to-path', 'node-addon-api', 'node-gyp-build', 'binding'];
 for (const mod of nativeModules) {
-  copyModule(mod);
+  copyModuleToDeps(mod);
 }
 
-// 8. CRITICAL: Ensure the 'next' module exists in standalone
-// Only copy what's actually needed at runtime
+// 6. Ensure critical modules exist somewhere (in .next/node_modules or _deps)
 console.log('\n🔍 Ensuring critical server modules exist...');
 const criticalModules = [
-  'next',
-  'react',
-  'react-dom',
-  'styled-jsx',
-  'caniuse-lite',
-  'busboy',
-  'semver',
-  'undici',
+  'next', 'react', 'react-dom', 'styled-jsx', 'caniuse-lite',
+  'busboy', 'semver', 'undici',
 ];
 
 for (const mod of criticalModules) {
-  ensureModule(mod);
+  ensureModuleInDeps(mod);
 }
 
 // Also ensure @next namespace modules
 const nextNsDir = path.join(cwd, 'node_modules', '@next');
 if (fs.existsSync(nextNsDir)) {
   try {
-    const nextNamespaced = fs.readdirSync(nextNsDir);
-    for (const sub of nextNamespaced) {
-      ensureModule('@next/' + sub);
+    for (const sub of fs.readdirSync(nextNsDir)) {
+      ensureModuleInDeps('@next/' + sub);
     }
   } catch (e) {
     console.warn('⚠️ Cannot read @next directory: ' + e.message);
   }
 }
 
-// 9. Clean up: Remove unnecessary files from standalone to reduce installer size
-console.log('\n🧹 Cleaning up standalone build...');
-let removedCount = 0;
-function cleanupDir(dir) {
-  if (!fs.existsSync(dir)) return;
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
-  for (const entry of entries) {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      // Remove known large/unnecessary directories
-      if (/^(test|tests|__tests__|docs|doc|example|examples|\.github|src|coverage|\.cache)$/i.test(entry.name)) {
-        try {
-          fs.rmSync(fullPath, { recursive: true, force: true });
-          removedCount++;
-        } catch (e) {}
-      } else {
-        cleanupDir(fullPath);
-      }
-    } else {
-      // Remove known unnecessary files
-      if (/\.(md|ts|map|tsbuildinfo|d\.ts)$/i.test(entry.name) ||
-          /^(CHANGELOG|LICENSE|README|Makefile|Dockerfile|\.npmignore|\.gitignore|\.editorconfig|\.babelrc|\.eslintrc|\.prettierrc)/i.test(entry.name)) {
-        try {
-          fs.unlinkSync(fullPath);
-          removedCount++;
-        } catch (e) {}
-      }
+// Also ensure @prisma namespace modules in _deps
+const prismaNsDir = path.join(cwd, 'node_modules', '@prisma');
+if (fs.existsSync(prismaNsDir)) {
+  try {
+    for (const sub of fs.readdirSync(prismaNsDir)) {
+      ensureModuleInDeps('@prisma/' + sub);
     }
-  }
+  } catch (e) {}
 }
-cleanupDir(path.join(cwd, '.next', 'standalone', 'node_modules'));
-console.log(`  Removed ${removedCount} unnecessary files/dirs`);
 
-// 10. Verify key files
+// 7. Verify key files
+console.log('\n🔍 Verifying build...');
 const keyFiles = [
   '.next/standalone/server.js',
   '.next/standalone/.next/static',
   '.next/standalone/public',
   '.next/standalone/prisma/schema.prisma',
-  '.next/standalone/node_modules/.prisma',
-  '.next/standalone/node_modules/next',
 ];
 
-console.log('\n🔍 Verifying build...');
 let allGood = true;
 for (const f of keyFiles) {
   const fullPath = path.join(cwd, f);
@@ -272,18 +182,33 @@ for (const f of keyFiles) {
   }
 }
 
+// Check where 'next' module is
+const nextLocations = [
+  path.join(cwd, '.next', 'standalone', 'node_modules', 'next'),
+  path.join(cwd, '.next', 'standalone', '.next', 'node_modules', 'next'),
+  path.join(cwd, '.next', 'standalone', '_deps', 'next'),
+];
+console.log('\n📦 next module locations:');
+for (const loc of nextLocations) {
+  if (fs.existsSync(loc)) {
+    console.log(`  ✅ ${loc}`);
+  }
+}
+
+// Check _deps contents
+const depsDir = path.join(cwd, '.next', 'standalone', '_deps');
+if (fs.existsSync(depsDir)) {
+  const entries = fs.readdirSync(depsDir);
+  console.log(`\n📦 _deps contains ${entries.length} entries: ${entries.slice(0, 20).join(', ')}`);
+}
+
 // Calculate standalone size
 function getDirSize(dir) {
   let size = 0;
   if (!fs.existsSync(dir)) return 0;
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
-  for (const entry of entries) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      size += getDirSize(fullPath);
-    } else {
-      try { size += fs.statSync(fullPath).size; } catch(e) {}
-    }
+    size += entry.isDirectory() ? getDirSize(fullPath) : fs.statSync(fullPath).size;
   }
   return size;
 }
@@ -291,36 +216,8 @@ function getDirSize(dir) {
 const standaloneSize = getDirSize(path.join(cwd, '.next', 'standalone'));
 console.log(`\n📦 Standalone build size: ${(standaloneSize / (1024 * 1024)).toFixed(2)} MB`);
 
-// List standalone/node_modules
-const nmDir = path.join(cwd, '.next', 'standalone', 'node_modules');
-if (fs.existsSync(nmDir)) {
-  const dirs = fs.readdirSync(nmDir).filter(d => {
-    return fs.statSync(path.join(nmDir, d)).isDirectory();
-  });
-  console.log(`📦 standalone/node_modules contains ${dirs.length} packages`);
-
-  // Check if next module has its key files
-  const nextDir = path.join(nmDir, 'next');
-  if (fs.existsSync(nextDir)) {
-    const nextPkg = path.join(nextDir, 'package.json');
-    if (fs.existsSync(nextPkg)) {
-      const pkg = JSON.parse(fs.readFileSync(nextPkg, 'utf-8'));
-      console.log(`  next module version: ${pkg.version}`);
-    }
-    const nextServerDir = path.join(nextDir, 'dist', 'server');
-    if (fs.existsSync(nextServerDir)) {
-      console.log('  ✅ next/dist/server exists');
-    } else {
-      console.log('  ❌ next/dist/server MISSING - next module is incomplete!');
-    }
-  }
-} else {
-  console.log('\n❌ standalone/node_modules DOES NOT EXIST - this is a critical issue!');
-  allGood = false;
-}
-
 if (allGood) {
-  console.log('\n✅ All files copied successfully!');
+  console.log('\n✅ Build prepared successfully!');
 } else {
-  console.log('\n⚠️ Some files are missing - the app may not work correctly');
+  console.log('\n⚠️ Some files are missing');
 }

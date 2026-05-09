@@ -23,7 +23,7 @@ function log(msg) {
 }
 
 log('=== Attindo Starting ===');
-log('Version: 1.3.1');
+log('Version: 1.3.2');
 log('Mode: ' + (isDev ? 'Development' : 'Production'));
 log('App Path: ' + app.getAppPath());
 log('Resources: ' + process.resourcesPath);
@@ -52,7 +52,6 @@ function ensureDatabase() {
   return dbPath;
 }
 
-// Convert Windows path to proper file:// URI for Prisma
 function getDatabaseUrl() {
   const dbPath = getDatabasePath();
   let normalizedPath = dbPath.replace(/\\/g, '/');
@@ -64,26 +63,19 @@ function getDatabaseUrl() {
 
 // ========== FIND NODE.JS BINARY ==========
 function findNodeBinary() {
-  // Priority 1: Bundled Node.js binary (most reliable)
-  const possibleBundledPaths = [
+  const possiblePaths = [
     path.join(process.resourcesPath, 'node', 'node.exe'),
     path.join(process.resourcesPath, 'node', 'node'),
     path.join(process.resourcesPath, 'app', 'node', 'node.exe'),
     path.join(process.resourcesPath, 'app', 'node', 'node'),
   ];
 
-  for (const p of possibleBundledPaths) {
+  for (const p of possiblePaths) {
     if (fs.existsSync(p)) {
       log('Found bundled Node.js: ' + p);
       return p;
     }
   }
-
-  // Priority 2: System Node.js
-  const sysNodePaths = [
-    'node', // Try PATH
-    process.execPath, // Electron binary (with ELECTRON_RUN_AS_NODE)
-  ];
 
   log('No bundled Node.js found, will use Electron as Node.js fallback');
   return process.execPath;
@@ -119,23 +111,66 @@ function findStandaloneDir() {
   return null;
 }
 
-// List directory contents recursively for diagnostics
-function listDir(dir, depth = 0, maxDepth = 2) {
-  if (depth > maxDepth) return '';
-  let result = '';
-  try {
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      const indent = '  '.repeat(depth);
-      result += `${indent}${entry.name}${entry.isDirectory() ? '/' : ''}\n`;
-      if (entry.isDirectory() && depth < maxDepth) {
-        result += listDir(path.join(dir, entry.name), depth + 1, maxDepth);
-      }
-    }
-  } catch (e) {
-    result += `  [Error reading: ${e.message}]\n`;
+// ========== FIND ALL NODE_MODULES PATHS ==========
+// Next.js standalone build puts modules in different locations:
+// 1. standalone/node_modules/ (sometimes, but electron-builder may prune this)
+// 2. standalone/.next/node_modules/ (where Next.js traces server deps)
+// 3. standalone/_deps/ (our extra modules that won't be pruned)
+function findNodeModulesPaths(standaloneDir) {
+  const paths = [];
+  
+  // 1. Root-level node_modules (may be pruned by electron-builder)
+  const rootNm = path.join(standaloneDir, 'node_modules');
+  if (fs.existsSync(rootNm)) {
+    paths.push(rootNm);
+    log('Found root node_modules: ' + rootNm);
+  } else {
+    log('Root node_modules NOT found');
   }
-  return result;
+
+  // 2. .next/node_modules (Next.js traced server dependencies - THIS IS THE KEY ONE)
+  const nextNm = path.join(standaloneDir, '.next', 'node_modules');
+  if (fs.existsSync(nextNm)) {
+    paths.push(nextNm);
+    log('Found .next/node_modules: ' + nextNm);
+    // Check if 'next' module exists here
+    const nextMod = path.join(nextNm, 'next');
+    if (fs.existsSync(nextMod)) {
+      log('  ✅ next module found in .next/node_modules');
+    }
+    // Check for @prisma
+    const prismaMod = path.join(nextNm, '@prisma');
+    if (fs.existsSync(prismaMod)) {
+      log('  ✅ @prisma found in .next/node_modules');
+    }
+    // Check for better-sqlite3
+    const bsqlite = path.join(nextNm, 'better-sqlite3');
+    if (fs.existsSync(bsqlite)) {
+      log('  ✅ better-sqlite3 found in .next/node_modules');
+    }
+    // List first 20 entries
+    try {
+      const entries = fs.readdirSync(nextNm);
+      log('  .next/node_modules has ' + entries.length + ' entries: ' + entries.slice(0, 20).join(', '));
+    } catch (e) {}
+  } else {
+    log('.next/node_modules NOT found');
+  }
+
+  // 3. _deps directory (our extra modules, not pruned by electron-builder)
+  const depsNm = path.join(standaloneDir, '_deps');
+  if (fs.existsSync(depsNm)) {
+    paths.push(depsNm);
+    log('Found _deps: ' + depsNm);
+    try {
+      const entries = fs.readdirSync(depsNm);
+      log('  _deps has ' + entries.length + ' entries: ' + entries.slice(0, 20).join(', '));
+    } catch (e) {}
+  } else {
+    log('_deps directory NOT found');
+  }
+
+  return paths;
 }
 
 // ========== NEXT.JS SERVER ==========
@@ -161,41 +196,8 @@ function startNextServer() {
     log('Server path: ' + serverPath);
     log('Standalone dir: ' + standaloneDir);
 
-    // List standalone dir contents for debugging
-    try {
-      log('Standalone top-level contents:\n' + listDir(standaloneDir, 0, 1));
-    } catch (e) {
-      log('Cannot read standalone dir: ' + e.message);
-    }
-
-    // Check if node_modules exists and has 'next'
-    const nodeModulesDir = path.join(standaloneDir, 'node_modules');
-    const nextModuleDir = path.join(nodeModulesDir, 'next');
-    log('node_modules exists: ' + fs.existsSync(nodeModulesDir));
-    log('next module exists: ' + fs.existsSync(nextModuleDir));
-
-    if (fs.existsSync(nodeModulesDir)) {
-      try {
-        const nmContents = fs.readdirSync(nodeModulesDir);
-        log('node_modules contains ' + nmContents.length + ' entries');
-        log('  First 30: ' + nmContents.slice(0, 30).join(', '));
-      } catch (e) {
-        log('Cannot read node_modules: ' + e.message);
-      }
-    }
-
-    // Check alternative node_modules locations
-    const altNodeModules = [
-      path.join(process.resourcesPath, 'node_modules'),
-      path.join(process.resourcesPath, 'app', 'node_modules'),
-      path.join(path.dirname(serverPath), '..', 'node_modules'),
-    ];
-    for (const alt of altNodeModules) {
-      const altNext = path.join(alt, 'next');
-      if (fs.existsSync(altNext)) {
-        log('Found next module at alternative location: ' + altNext);
-      }
-    }
+    // Find ALL possible node_modules locations
+    const nodeModulesPaths = findNodeModulesPaths(standaloneDir);
 
     const dbUrl = getDatabaseUrl();
     log('Database URL: ' + dbUrl);
@@ -206,6 +208,11 @@ function startNextServer() {
     log('Node binary: ' + nodeBinary);
     log('Using Electron as Node: ' + usingElectronAsNode);
 
+    // Build NODE_PATH with ALL module locations
+    // This is the key fix: include .next/node_modules/ where Next.js actually puts its deps
+    const nodePathValue = nodeModulesPaths.join(path.delimiter);
+    log('NODE_PATH will be: ' + nodePathValue);
+
     // Build environment for the server process
     const serverEnv = {
       ...process.env,
@@ -213,8 +220,7 @@ function startNextServer() {
       PORT: String(nextPort),
       HOSTNAME: '0.0.0.0',
       NODE_ENV: 'production',
-      // NODE_PATH helps Node.js find modules if they're in an unexpected location
-      NODE_PATH: nodeModulesDir,
+      NODE_PATH: nodePathValue,
     };
 
     // If using Electron as Node.js, set the flag
@@ -223,10 +229,6 @@ function startNextServer() {
     }
 
     log('Starting server with env PORT=' + nextPort + ' HOSTNAME=0.0.0.0');
-    log('NODE_PATH=' + nodeModulesDir);
-    if (usingElectronAsNode) {
-      log('ELECTRON_RUN_AS_NODE=1');
-    }
 
     try {
       nextServer = spawn(nodeBinary, [serverPath], {
@@ -241,7 +243,6 @@ function startNextServer() {
         const output = data.toString();
         log('[Next.js stdout] ' + output.trim());
 
-        // Detect when server is ready
         if (!serverStarted && (output.includes('Ready') || output.includes('started') || output.includes('Listening') || output.includes('Local:'))) {
           serverStarted = true;
           resolve(nextPort);
@@ -268,7 +269,7 @@ function startNextServer() {
         }
       });
 
-      // Timeout - if server doesn't signal ready in 45s, try HTTP check
+      // Timeout
       setTimeout(() => {
         if (!serverStarted) {
           log('Server startup timeout, checking if it responds to HTTP...');
@@ -357,42 +358,23 @@ function showErrorPage(window, errorMsg) {
           max-width: 500px;
           padding: 40px;
         }
-        .icon {
-          font-size: 60px;
-          margin-bottom: 20px;
-        }
+        .icon { font-size: 60px; margin-bottom: 20px; }
         h1 { font-size: 24px; margin-bottom: 12px; color: #F87171; }
         p { font-size: 14px; color: #94A3B8; margin-bottom: 20px; line-height: 1.6; }
         .error-box {
-          background: #1E293B;
-          border: 1px solid #334155;
-          border-radius: 8px;
-          padding: 16px;
-          text-align: left;
-          font-family: 'Consolas', 'Courier New', monospace;
-          font-size: 12px;
-          color: #FB923C;
-          max-height: 150px;
-          overflow-y: auto;
-          word-break: break-all;
+          background: #1E293B; border: 1px solid #334155; border-radius: 8px;
+          padding: 16px; text-align: left;
+          font-family: 'Consolas', 'Courier New', monospace; font-size: 12px;
+          color: #FB923C; max-height: 150px; overflow-y: auto; word-break: break-all;
         }
         .retry-btn {
-          margin-top: 20px;
-          padding: 12px 32px;
+          margin-top: 20px; padding: 12px 32px;
           background: linear-gradient(135deg, #14B8A6, #0D9488);
-          color: white;
-          border: none;
-          border-radius: 8px;
-          font-size: 16px;
-          cursor: pointer;
-          transition: opacity 0.2s;
+          color: white; border: none; border-radius: 8px; font-size: 16px;
+          cursor: pointer; transition: opacity 0.2s;
         }
         .retry-btn:hover { opacity: 0.9; }
-        .log-path {
-          margin-top: 16px;
-          font-size: 11px;
-          color: #475569;
-        }
+        .log-path { margin-top: 16px; font-size: 11px; color: #475569; }
       </style>
     </head>
     <body>
@@ -423,8 +405,7 @@ function showLoadingPage(window) {
           background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
           display: flex; align-items: center; justify-content: center;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-          color: white;
-          overflow: hidden;
+          color: white; overflow: hidden;
         }
         .container { text-align: center; }
         .logo {
@@ -437,27 +418,12 @@ function showLoadingPage(window) {
           box-shadow: 0 8px 32px rgba(20,184,166,0.3);
           animation: pulse 2s ease-in-out infinite;
         }
-        @keyframes pulse {
-          0%, 100% { transform: scale(1); }
-          50% { transform: scale(1.05); }
-        }
+        @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
         .title { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
         .subtitle { font-size: 14px; color: #94A3B8; margin-bottom: 30px; }
-        .loader {
-          width: 200px; height: 4px;
-          background: #334155; border-radius: 2px;
-          overflow: hidden; margin: 0 auto;
-        }
-        .loader-bar {
-          width: 40%; height: 100%;
-          background: linear-gradient(90deg, #14B8A6, #0D9488);
-          border-radius: 2px;
-          animation: loading 1.5s ease-in-out infinite;
-        }
-        @keyframes loading {
-          0% { transform: translateX(-100%); }
-          100% { transform: translateX(350%); }
-        }
+        .loader { width: 200px; height: 4px; background: #334155; border-radius: 2px; overflow: hidden; margin: 0 auto; }
+        .loader-bar { width: 40%; height: 100%; background: linear-gradient(90deg, #14B8A6, #0D9488); border-radius: 2px; animation: loading 1.5s ease-in-out infinite; }
+        @keyframes loading { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }
         .status { margin-top: 16px; font-size: 12px; color: #64748B; }
       </style>
     </head>
@@ -467,7 +433,7 @@ function showLoadingPage(window) {
         <div class="title">Attindo</div>
         <div class="subtitle">HR & Payroll System</div>
         <div class="loader"><div class="loader-bar"></div></div>
-        <div class="status" id="status">Starting server...</div>
+        <div class="status">Starting server...</div>
       </div>
     </body>
     </html>
@@ -478,13 +444,8 @@ function showLoadingPage(window) {
 // ========== SPLASH WINDOW ==========
 function createSplashWindow() {
   const splash = new BrowserWindow({
-    width: 500,
-    height: 350,
-    transparent: true,
-    frame: false,
-    alwaysOnTop: true,
-    resizable: false,
-    center: true,
+    width: 500, height: 350, transparent: true, frame: false,
+    alwaysOnTop: true, resizable: false, center: true,
   });
 
   const splashHTML = `
@@ -496,36 +457,22 @@ function createSplashWindow() {
         body {
           width: 500px; height: 350px;
           background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
-          display: flex; flex-direction: column;
-          align-items: center; justify-content: center;
+          display: flex; flex-direction: column; align-items: center; justify-content: center;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
           color: white; border-radius: 16px; overflow: hidden;
         }
         .logo {
           width: 80px; height: 80px;
           background: linear-gradient(135deg, #14B8A6, #0D9488);
-          border-radius: 20px;
-          display: flex; align-items: center; justify-content: center;
-          font-size: 40px; font-weight: bold;
-          margin-bottom: 20px;
+          border-radius: 20px; display: flex; align-items: center; justify-content: center;
+          font-size: 40px; font-weight: bold; margin-bottom: 20px;
           box-shadow: 0 8px 32px rgba(20,184,166,0.3);
         }
         .title { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
         .subtitle { font-size: 14px; color: #94A3B8; margin-bottom: 30px; }
-        .loader {
-          width: 200px; height: 4px;
-          background: #334155; border-radius: 2px; overflow: hidden;
-        }
-        .loader-bar {
-          width: 40%; height: 100%;
-          background: linear-gradient(90deg, #14B8A6, #0D9488);
-          border-radius: 2px;
-          animation: loading 1.5s ease-in-out infinite;
-        }
-        @keyframes loading {
-          0% { transform: translateX(-100%); }
-          100% { transform: translateX(350%); }
-        }
+        .loader { width: 200px; height: 4px; background: #334155; border-radius: 2px; overflow: hidden; }
+        .loader-bar { width: 40%; height: 100%; background: linear-gradient(90deg, #14B8A6, #0D9488); border-radius: 2px; animation: loading 1.5s ease-in-out infinite; }
+        @keyframes loading { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }
         .version { margin-top: 20px; font-size: 11px; color: #475569; }
       </style>
     </head>
@@ -534,7 +481,7 @@ function createSplashWindow() {
       <div class="title">Attindo</div>
       <div class="subtitle">HR & Payroll System</div>
       <div class="loader"><div class="loader-bar"></div></div>
-      <div class="version">v1.3.1</div>
+      <div class="version">v1.3.2</div>
     </body>
     </html>
   `;
@@ -546,22 +493,16 @@ function createSplashWindow() {
 // ========== MAIN WINDOW ==========
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
-    minWidth: 1024,
-    minHeight: 700,
+    width: 1400, height: 900, minWidth: 1024, minHeight: 700,
     title: 'Attindo - HR & Payroll System',
     icon: path.join(isDev ? process.cwd() : process.resourcesPath, 'public', 'logo.svg'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      nodeIntegration: false,
-      contextIsolation: true,
+      nodeIntegration: false, contextIsolation: true,
     },
-    show: false,
-    backgroundColor: '#0F172A',
+    show: false, backgroundColor: '#0F172A',
   });
 
-  // Show loading page first
   showLoadingPage(mainWindow);
   mainWindow.show();
 
@@ -583,10 +524,9 @@ function createMenu() {
           label: 'About Attindo',
           click: () => {
             dialog.showMessageBox(mainWindow, {
-              type: 'info',
-              title: 'About Attindo',
+              type: 'info', title: 'About Attindo',
               message: 'Attindo - HR & Payroll System',
-              detail: 'Version 1.3.1\n\nProfessional HR & Payroll Management System\n\nLog file: ' + logFile,
+              detail: 'Version 1.3.2\n\nProfessional HR & Payroll Management System\n\nLog file: ' + logFile,
             });
           },
         },
@@ -599,27 +539,22 @@ function createMenu() {
     {
       label: 'Edit',
       submenu: [
-        { role: 'undo' }, { role: 'redo' },
-        { type: 'separator' },
+        { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
         { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
       ],
     },
     {
       label: 'View',
       submenu: [
-        { role: 'reload' }, { role: 'forceReload' },
-        { role: 'toggleDevTools' },
+        { role: 'reload' }, { role: 'forceReload' }, { role: 'toggleDevTools' },
         { type: 'separator' },
         { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' },
-        { type: 'separator' },
-        { role: 'togglefullscreen' },
+        { type: 'separator' }, { role: 'togglefullscreen' },
       ],
     },
     {
       label: 'Window',
-      submenu: [
-        { role: 'minimize' }, { role: 'zoom' }, { role: 'close' },
-      ],
+      submenu: [{ role: 'minimize' }, { role: 'zoom' }, { role: 'close' }],
     },
   ];
 
@@ -662,12 +597,10 @@ app.whenReady().then(async () => {
       splash = createSplashWindow();
     }
 
-    // Ensure database exists
     const dbPath = ensureDatabase();
     log('Database path: ' + dbPath);
     log('Database URL: ' + getDatabaseUrl());
 
-    // Start Next.js server
     let serverReady = false;
 
     if (!isDev) {
@@ -691,12 +624,10 @@ app.whenReady().then(async () => {
       }
     }
 
-    // Seed database
     if (serverReady) {
       await seedViaApi();
     }
 
-    // Close splash, create main window
     if (splash) splash.close();
     createWindow();
     createMenu();
