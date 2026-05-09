@@ -1,0 +1,316 @@
+// Attindo HR & Payroll System - Database Schema
+// SQLite Database
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// COMPANY & SETTINGS
+// ============================================================
+
+model Company {
+  id             String   @id @default(cuid())
+  name           String
+  nameAr         String   @default("")
+  address        String   @default("")
+  phone          String   @default("")
+  email          String   @default("")
+  logo           String   @default("")
+  currency       String   @default("JOD")
+  currencySymbol String   @default("د.ا")
+  fiscalYearStart String  @default("01")
+  taxRate        Float    @default(0.0)
+  workingHoursPerDay Float @default(8.0)
+  overtimeRate   Float    @default(1.5)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Settings {
+  id       String @id @default(cuid())
+  key      String @unique
+  value    String @default("")
+  category String @default("general")
+}
+
+// ============================================================
+// USERS & AUTHENTICATION
+// ============================================================
+
+model User {
+  id        String   @id @default(cuid())
+  username  String   @unique
+  password  String
+  name      String
+  email     String   @default("")
+  role      String   @default("ADMIN") // ADMIN, HR_MANAGER, ACCOUNTANT, VIEWER
+  isActive  Boolean  @default(true)
+  lastLogin DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ============================================================
+// ORGANIZATION STRUCTURE
+// ============================================================
+
+model Department {
+  id          String   @id @default(cuid())
+  name        String
+  nameAr      String   @default("")
+  description String   @default("")
+  managerId   String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  employees   Employee[]
+  positions   Position[]
+}
+
+model Position {
+  id          String   @id @default(cuid())
+  title       String
+  titleAr     String   @default("")
+  departmentId String
+  minSalary   Float    @default(0)
+  maxSalary   Float    @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  department  Department @relation(fields: [departmentId], references: [id])
+  employees   Employee[]
+}
+
+// ============================================================
+// EMPLOYEES
+// ============================================================
+
+model Employee {
+  id              String   @id @default(cuid())
+  employeeId      String   @unique
+  firstName       String
+  lastName        String
+  firstNameAr     String   @default("")
+  lastNameAr      String   @default("")
+  email           String   @default("")
+  phone           String   @default("")
+  gender          String   @default("MALE") // MALE, FEMALE
+  dateOfBirth     DateTime?
+  nationality     String   @default("")
+  address         String   @default("")
+  emergencyContact String  @default("")
+  departmentId    String
+  positionId      String
+  hireDate        DateTime
+  salary          Float    @default(0)
+  status          String   @default("ACTIVE") // ACTIVE, INACTIVE, TERMINATED, ON_LEAVE
+  fingerprintEnrolled Boolean @default(false)
+  fingerprintId   String   @default("")
+  photo           String   @default("")
+  bankName        String   @default("")
+  bankAccount     String   @default("")
+  notes           String   @default("")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  department      Department @relation(fields: [departmentId], references: [id])
+  position        Position   @relation(fields: [positionId], references: [id])
+  attendance      Attendance[]
+  leaves          Leave[]
+  payrollItems    PayrollItem[]
+}
+
+// ============================================================
+// FINGERPRINT DEVICES (ZK)
+// ============================================================
+
+model FingerprintDevice {
+  id         String   @id @default(cuid())
+  name       String
+  ip         String
+  port       Int      @default(4370)
+  deviceType String   @default("ZK") // ZK, OTHER
+  status     String   @default("ACTIVE") // ACTIVE, INACTIVE, ERROR
+  location   String   @default("")
+  lastSync   DateTime?
+  sn         String   @default("") // Serial Number
+  firmware   String   @default("")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// ============================================================
+// ATTENDANCE
+// ============================================================
+
+model Attendance {
+  id               String   @id @default(cuid())
+  employeeId       String
+  date             DateTime
+  checkIn          DateTime?
+  checkOut         DateTime?
+  status           String   @default("PRESENT") // PRESENT, ABSENT, LATE, HALF_DAY, LEAVE, HOLIDAY
+  overtimeHours    Float    @default(0)
+  lateMinutes      Float    @default(0)
+  earlyLeaveMinutes Float   @default(0)
+  notes            String   @default("")
+  deviceId         String   @default("")
+  fingerprintMatch Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  employee         Employee @relation(fields: [employeeId], references: [id])
+}
+
+// ============================================================
+// LEAVE MANAGEMENT
+// ============================================================
+
+model LeaveType {
+  id           String   @id @default(cuid())
+  name         String
+  nameAr       String   @default("")
+  defaultDays  Int      @default(0)
+  isPaid       Boolean  @default(true)
+  carryForward Boolean  @default(false)
+  maxCarryDays Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  leaves       Leave[]
+}
+
+model Leave {
+  id         String   @id @default(cuid())
+  employeeId String
+  typeId     String
+  startDate  DateTime
+  endDate    DateTime
+  days       Int
+  status     String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  reason     String   @default("")
+  approvedBy String   @default("")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  employee   Employee  @relation(fields: [employeeId], references: [id])
+  leaveType  LeaveType @relation(fields: [typeId], references: [id])
+}
+
+// ============================================================
+// SALARY COMPONENTS
+// ============================================================
+
+model SalaryComponent {
+  id         String   @id @default(cuid())
+  name       String
+  nameAr     String   @default("")
+  type       String   // ALLOWANCE, DEDUCTION
+  amount     Float    @default(0)
+  percentage Float    @default(0)
+  isFixed    Boolean  @default(true)
+  isTaxable  Boolean  @default(false)
+  isRecurring Boolean @default(true)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// ============================================================
+// PAYROLL
+// ============================================================
+
+model Payroll {
+  id             String   @id @default(cuid())
+  month          Int
+  year           Int
+  status         String   @default("DRAFT") // DRAFT, PROCESSING, COMPLETED, PAID
+  generatedAt    DateTime @default(now())
+  paidAt         DateTime?
+  totalGross     Float    @default(0)
+  totalDeductions Float   @default(0)
+  totalNet       Float    @default(0)
+  notes          String   @default("")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  items          PayrollItem[]
+
+  @@unique([month, year])
+}
+
+model PayrollItem {
+  id              String   @id @default(cuid())
+  payrollId       String
+  employeeId      String
+  basicSalary     Float    @default(0)
+  totalAllowances Float    @default(0)
+  totalDeductions Float    @default(0)
+  grossSalary     Float    @default(0)
+  taxAmount       Float    @default(0)
+  netSalary       Float    @default(0)
+  daysWorked      Int      @default(0)
+  overtimeHours   Float    @default(0)
+  overtimeAmount  Float    @default(0)
+  details         String   @default("") // JSON string for breakdown
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  payroll         Payroll   @relation(fields: [payrollId], references: [id])
+  employee        Employee  @relation(fields: [employeeId], references: [id])
+}
+
+// ============================================================
+// LICENSE MANAGEMENT
+// ============================================================
+
+model License {
+  id              String   @id @default(cuid())
+  key             String   @unique
+  module          String   // HR, PAYROLL, FINGERPRINT
+  maxDevices      Int      @default(1)
+  activatedDevices Int     @default(0)
+  activatedAt     DateTime?
+  expiresAt       DateTime?
+  isActive        Boolean  @default(false)
+  machineId       String   @default("")
+  companyName     String   @default("")
+  contactEmail    String   @default("")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ============================================================
+// AUDIT LOG
+// ============================================================
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String   @default("")
+  action    String
+  entity    String
+  entityId  String   @default("")
+  details   String   @default("")
+  timestamp DateTime @default(now())
+}
+
+// ============================================================
+// HOLIDAYS
+// ============================================================
+
+model Holiday {
+  id        String   @id @default(cuid())
+  name      String
+  nameAr    String   @default("")
+  date      DateTime
+  type      String   @default("PUBLIC") // PUBLIC, COMPANY
+  recurring Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
