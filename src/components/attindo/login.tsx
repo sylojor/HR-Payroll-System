@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
-import { Fingerprint, Loader2, Eye, EyeOff } from 'lucide-react'
+import { Fingerprint, Loader2, Eye, EyeOff, Database, RefreshCw, AlertTriangle } from 'lucide-react'
 
 export function Login() {
   const { setAuthenticated, setUser, language } = useAppStore()
@@ -18,24 +18,65 @@ export function Login() {
   const [error, setError] = useState('')
   const [needsSetup, setNeedsSetup] = useState<boolean | null>(null)
   const [checkingSetup, setCheckingSetup] = useState(true)
+  const [dbError, setDbError] = useState(false)
+  const [initializing, setInitializing] = useState(false)
+  const [initError, setInitError] = useState('')
 
   const isRTL = language === 'ar'
 
-  useEffect(() => {
-    const checkSetup = async () => {
-      try {
-        const res = await fetch('/api/setup/check')
-        const data = await res.json()
-        setNeedsSetup(data.needsSetup)
-      } catch {
-        // If check fails, assume setup is needed
-        setNeedsSetup(true)
-      } finally {
-        setCheckingSetup(false)
+  const checkSetup = async () => {
+    setCheckingSetup(true)
+    setDbError(false)
+    try {
+      const res = await fetch('/api/setup/check')
+      const data = await res.json()
+      setNeedsSetup(data.needsSetup)
+      if (data.dbError) {
+        setDbError(true)
       }
+    } catch {
+      // If check fails, assume setup is needed
+      setNeedsSetup(true)
+      setDbError(true)
+    } finally {
+      setCheckingSetup(false)
     }
+  }
+
+  useEffect(() => {
     checkSetup()
   }, [])
+
+  const handleInitializeDatabase = async (withSeed: boolean = true) => {
+    setInitializing(true)
+    setInitError('')
+    try {
+      const res = await fetch('/api/db-init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ seed: withSeed }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        setInitError(data.error || 'Initialization failed')
+        return
+      }
+
+      // If we seeded a default admin, we can go straight to login
+      if (withSeed && data.user) {
+        setDbError(false)
+        setNeedsSetup(false)
+      } else {
+        // Re-check setup status
+        await checkSetup()
+      }
+    } catch {
+      setInitError('Network error during initialization. Please try again.')
+    } finally {
+      setInitializing(false)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -82,6 +123,96 @@ export function Login() {
             <Loader2 className="w-4 h-4 animate-spin" />
             <span className="text-sm">{isRTL ? 'جاري التحميل...' : 'Loading...'}</span>
           </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Show database initialization screen if there's a database error
+  if (dbError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-teal-50 via-white to-emerald-50 px-4">
+        <div className="w-full max-w-md">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 shadow-lg shadow-amber-200 mb-4">
+              <Database className="w-10 h-10 text-white" />
+            </div>
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+              {isRTL ? 'تهيئة قاعدة البيانات' : 'Database Setup Required'}
+            </h1>
+            <p className="text-slate-500 mt-2 text-sm">
+              {isRTL
+                ? 'قاعدة البيانات غير جاهزة بعد. يمكنك تهيئتها الآن.'
+                : 'The database is not ready yet. You can initialize it now.'}
+            </p>
+          </div>
+
+          <Card className="border-0 shadow-xl shadow-slate-200/50">
+            <CardContent className="p-6 space-y-4">
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-amber-800">
+                      {isRTL ? 'قاعدة البيانات تحتاج تهيئة' : 'Database needs initialization'}
+                    </p>
+                    <p className="text-xs text-amber-600 mt-1">
+                      {isRTL
+                        ? 'الجداول لم يتم إنشاؤها بعد. اضغط الزر أدناه لتهيئة قاعدة البيانات.'
+                        : 'Tables have not been created yet. Click below to initialize the database.'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {initError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">
+                  {initError}
+                </div>
+              )}
+
+              <Button
+                onClick={() => handleInitializeDatabase(true)}
+                disabled={initializing}
+                className="w-full h-12 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white font-medium shadow-lg shadow-teal-200/50 transition-all"
+              >
+                {initializing ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                    {isRTL ? 'جاري التهيئة...' : 'Initializing...'}
+                  </>
+                ) : (
+                  <>
+                    <Database className="w-4 h-4 mr-2" />
+                    {isRTL ? 'تهيئة مع حساب مدير افتراضي (admin / admin123)' : 'Initialize with Default Admin (admin / admin123)'}
+                  </>
+                )}
+              </Button>
+
+              <Button
+                onClick={() => handleInitializeDatabase(false)}
+                disabled={initializing}
+                variant="outline"
+                className="w-full h-11 border-slate-200 text-slate-600 hover:bg-slate-50"
+              >
+                {isRTL ? 'تهيئة بدون بيانات (استخدام معالج الإعداد)' : 'Initialize Without Data (Use Setup Wizard)'}
+              </Button>
+
+              <Button
+                onClick={checkSetup}
+                disabled={initializing}
+                variant="ghost"
+                className="w-full text-slate-500 hover:text-slate-700"
+              >
+                <RefreshCw className="w-4 h-4 mr-2" />
+                {isRTL ? 'إعادة الفحص' : 'Re-check'}
+              </Button>
+            </CardContent>
+          </Card>
+
+          <p className="text-center text-xs text-slate-400 mt-6">
+            © 2025 Attindo HR & Payroll System
+          </p>
         </div>
       </div>
     )

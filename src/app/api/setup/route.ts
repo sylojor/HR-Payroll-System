@@ -1,5 +1,79 @@
 import { db } from '@/lib/db'
 import { NextRequest, NextResponse } from 'next/server'
+import { exec } from 'child_process'
+import { existsSync, mkdirSync, writeFileSync } from 'fs'
+import path from 'path'
+
+function getDbPath(): string | null {
+  const dbUrl = process.env.DATABASE_URL || ''
+  if (!dbUrl.startsWith('file:')) return null
+
+  let filePath = dbUrl.replace(/^file:/, '')
+
+  if (filePath.startsWith('///')) {
+    filePath = filePath.slice(2)
+  } else if (filePath.startsWith('//')) {
+    filePath = filePath.slice(1)
+  }
+
+  if (process.platform === 'win32') {
+    if (filePath.match(/^\/[A-Za-z]:\//)) {
+      filePath = filePath.slice(1)
+    }
+  }
+
+  if (path.isAbsolute(filePath)) return filePath
+  return path.resolve(process.cwd(), filePath.replace(/^\.\//, ''))
+}
+
+/**
+ * Try to ensure database schema exists by running prisma db push
+ */
+async function ensureDatabaseSchema(): Promise<boolean> {
+  try {
+    // First, check if the database file exists
+    const dbPath = getDbPath()
+    if (dbPath) {
+      const dbDir = path.dirname(dbPath)
+      if (!existsSync(dbDir)) {
+        mkdirSync(dbDir, { recursive: true })
+      }
+      if (!existsSync(dbPath)) {
+        writeFileSync(dbPath, '')
+      }
+    }
+
+    // Try a simple query to see if tables exist
+    await db.user.count()
+    return true
+  } catch {
+    // Tables don't exist - try to create them using async exec
+    try {
+      console.log('[setup] Database tables not found, running prisma db push...')
+      const result = await new Promise<{success: boolean, error?: string}>((resolve) => {
+        exec('npx prisma db push --accept-data-loss --skip-generate', {
+          timeout: 120000,
+          env: { ...process.env },
+        }, (error) => {
+          if (error) {
+            console.error('[setup] prisma db push failed:', error.message)
+            resolve({ success: false, error: error.message })
+          } else {
+            resolve({ success: true })
+          }
+        })
+      })
+      if (result.success) {
+        console.log('[setup] prisma db push completed successfully')
+        return true
+      }
+      return false
+    } catch (pushError) {
+      console.error('[setup] prisma db push failed:', pushError)
+      return false
+    }
+  }
+}
 
 interface SetupBody {
   company: {
@@ -25,6 +99,15 @@ interface SetupBody {
 
 export async function POST(request: NextRequest) {
   try {
+    // Ensure database schema exists before trying to query
+    const schemaReady = await ensureDatabaseSchema()
+    if (!schemaReady) {
+      return NextResponse.json(
+        { error: 'Unable to initialize the database schema. Please run "npx prisma db push" manually and restart the application.' },
+        { status: 503 }
+      )
+    }
+
     // Check if any users exist - if yes, setup already done
     let userCount = 0
     try {
@@ -32,7 +115,7 @@ export async function POST(request: NextRequest) {
     } catch (dbError) {
       console.error('Database connection error during setup check:', dbError)
       return NextResponse.json(
-        { error: 'Unable to connect to the database. Please restart the application and try again. If the problem persists, the database may need to be reinitialized.' },
+        { error: 'Unable to connect to the database. Please restart the application and try again.' },
         { status: 503 }
       )
     }
@@ -158,7 +241,7 @@ export async function POST(request: NextRequest) {
       // Database connectivity errors
       if (msg.includes('Error code 14') || msg.includes('Unable to open the database file')) {
         return NextResponse.json(
-          { error: 'Unable to connect to the database. Please restart the application and try again.' },
+          { error: 'Unable to connect to the database. Please use the "Initialize Database" option on the login screen.' },
           { status: 503 }
         )
       }
@@ -166,7 +249,7 @@ export async function POST(request: NextRequest) {
       // Table doesn't exist errors
       if (msg.includes('does not exist') || msg.includes('no such table')) {
         return NextResponse.json(
-          { error: 'Database tables not found. The application needs to be restarted to initialize the database.' },
+          { error: 'Database tables not found. Please use the "Initialize Database" option on the login screen.' },
           { status: 503 }
         )
       }
