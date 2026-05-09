@@ -51,9 +51,7 @@
       "installerLanguages": ["en-US", "ar"],
       "language": "1033"
     },
-    "compression": {
-      "maximum": true
-    },
+    "compression": "maximum",
     "files": [
       "electron/**/*",
       "package.json"
