@@ -23,7 +23,7 @@ function log(msg) {
 }
 
 log('=== Attindo Starting ===');
-log('Version: 1.3.0');
+log('Version: 1.3.1');
 log('Mode: ' + (isDev ? 'Development' : 'Production'));
 log('App Path: ' + app.getAppPath());
 log('Resources: ' + process.resourcesPath);
@@ -534,7 +534,7 @@ function createSplashWindow() {
       <div class="title">Attindo</div>
       <div class="subtitle">HR & Payroll System</div>
       <div class="loader"><div class="loader-bar"></div></div>
-      <div class="version">v1.3.0</div>
+      <div class="version">v1.3.1</div>
     </body>
     </html>
   `;
@@ -586,7 +586,7 @@ function createMenu() {
               type: 'info',
               title: 'About Attindo',
               message: 'Attindo - HR & Payroll System',
-              detail: 'Version 1.3.0\n\nProfessional HR & Payroll Management System\n\nLog file: ' + logFile,
+              detail: 'Version 1.3.1\n\nProfessional HR & Payroll Management System\n\nLog file: ' + logFile,
             });
           },
         },

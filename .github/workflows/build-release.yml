@@ -27,16 +27,8 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
       - name: Install dependencies
-        run: |
-          # Use npm for reliable node_modules structure (Bun's symlink-based structure
-          # can cause issues with Next.js standalone build module tracing)
-          npm install --legacy-peer-deps
+        run: npm install --legacy-peer-deps
         env:
           NODE_ENV: development
 
@@ -48,10 +40,10 @@ jobs:
         env:
           DATABASE_URL: "file:./db/attindo.db"
 
-      - name: Copy standalone files
+      - name: Copy standalone files (optimized)
         run: node scripts/copy-standalone.js
 
-      - name: Verify standalone build has node_modules
+      - name: Verify standalone build
         shell: pwsh
         run: |
           Write-Host "=== Verifying standalone build ==="
@@ -68,16 +60,10 @@ jobs:
             Write-Host "❌ next module NOT found in standalone!"
             Write-Host "   Attempting to copy from project node_modules..."
             Copy-Item -Path "node_modules\next" -Destination $nextModuleDir -Recurse -Force -ErrorAction SilentlyContinue
-            if (Test-Path $nextModuleDir) {
-              Write-Host "✅ next module copied successfully"
-            } else {
-              Write-Host "❌ Failed to copy next module - build may be broken!"
-            }
           }
 
-          # Also check for next/dist/server
-          $nextServerDir = "$nextModuleDir\dist\server"
-          if (Test-Path $nextServerDir) {
+          # Check for next/dist/server
+          if (Test-Path "$nextModuleDir\dist\server") {
             Write-Host "✅ next/dist/server exists"
           } else {
             Write-Host "❌ next/dist/server MISSING"
@@ -91,53 +77,23 @@ jobs:
             Write-Host "❌ standalone/node_modules DOES NOT EXIST!"
           }
 
+          # Report standalone size
+          $standaloneSize = (Get-ChildItem $standaloneDir -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB
+          Write-Host "📦 Standalone size: $([math]::Round($standaloneSize, 2)) MB"
+
       - name: Copy Node.js binary for bundling
         shell: pwsh
         run: |
-          # Get the Node.js binary path from the runner
           $nodePath = (Get-Command node).Source
           Write-Host "Node.js binary: $nodePath"
           $nodeVersion = node --version
           Write-Host "Node.js version: $nodeVersion"
 
-          # Create build directory and copy node.exe
           New-Item -ItemType Directory -Force -Path "build" | Out-Null
           Copy-Item $nodePath "build\node.exe" -Force
 
           $fileSize = (Get-Item "build\node.exe").Length / 1MB
-          Write-Host "✅ Node.js binary copied to build/node.exe ($([math]::Round($fileSize, 2)) MB)"
-
-      - name: Diagnostic - List build output
-        shell: pwsh
-        run: |
-          Write-Host "=== .next directory ==="
-          if (Test-Path ".next") {
-            Get-ChildItem ".next" -Depth 0 | ForEach-Object { Write-Host "  $($_.Name) [$($_.GetType().Name)]" }
-          } else {
-            Write-Host ".next NOT found"
-          }
-          Write-Host ""
-          Write-Host "=== .next/standalone directory ==="
-          if (Test-Path ".next\standalone") {
-            Get-ChildItem ".next\standalone" -Depth 0 | ForEach-Object { Write-Host "  $($_.Name)" }
-          } else {
-            Write-Host ".next/standalone NOT found"
-          }
-          Write-Host ""
-          Write-Host "=== .next/standalone/.next ==="
-          if (Test-Path ".next\standalone\.next") {
-            Get-ChildItem ".next\standalone\.next" -Depth 0 | ForEach-Object { Write-Host "  $($_.Name)" }
-          } else {
-            Write-Host ".next/standalone/.next NOT found"
-          }
-          Write-Host ""
-          Write-Host "=== Build resources ==="
-          if (Test-Path "build\icon.ico") { Write-Host "  ✅ icon.ico" } else { Write-Host "  ❌ icon.ico MISSING" }
-          if (Test-Path "build\node.exe") { Write-Host "  ✅ node.exe" } else { Write-Host "  ❌ node.exe MISSING" }
-          if (Test-Path "electron\main.js") { Write-Host "  ✅ electron/main.js" } else { Write-Host "  ❌ electron/main.js MISSING" }
-          if (Test-Path "electron\preload.js") { Write-Host "  ✅ electron/preload.js" } else { Write-Host "  ❌ electron/preload.js MISSING" }
-          if (Test-Path ".next\standalone\server.js") { Write-Host "  ✅ standalone/server.js" } else { Write-Host "  ❌ standalone/server.js MISSING" }
-          if (Test-Path ".next\standalone\node_modules\next") { Write-Host "  ✅ standalone/node_modules/next" } else { Write-Host "  ❌ standalone/node_modules/next MISSING" }
+          Write-Host "✅ Node.js binary copied ($([math]::Round($fileSize, 2)) MB)"
 
       - name: Build Electron App (Windows)
         run: npx electron-builder --win --publish never
@@ -191,7 +147,7 @@ jobs:
             ## 📋 System Requirements
             - Windows 10 or later (64-bit)
             - 4 GB RAM minimum
-            - 500 MB disk space
+            - 300 MB disk space
 
             ## 🚀 Installation
             1. Download `Attindo-Setup-${{ steps.version.outputs.VERSION }}.exe`
