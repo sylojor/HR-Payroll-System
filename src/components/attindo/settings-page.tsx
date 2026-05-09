@@ -1,15 +1,26 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useAppStore } from '@/lib/store'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
-import { Settings, Building2, Clock, Banknote, Fingerprint, Save, RefreshCw } from 'lucide-react'
+import { Settings, Building2, Clock, Banknote, Fingerprint, Save, RefreshCw, Database, Download, Upload, Key, Eye, EyeOff, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 
 interface CompanyData {
   id: string
@@ -30,13 +41,27 @@ interface SettingsGroup {
 }
 
 export function SettingsPage() {
-  const { language } = useAppStore()
+  const { language, user } = useAppStore()
   const isRTL = language === 'ar'
   const [company, setCompany] = useState<CompanyData | null>(null)
   const [settings, setSettings] = useState<SettingsGroup>({})
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [companyForm, setCompanyForm] = useState<Partial<CompanyData>>({})
+
+  // Backup/Restore
+  const [backingUp, setBackingUp] = useState(false)
+  const [restoring, setRestoring] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Change Password
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmNewPassword, setConfirmNewPassword] = useState('')
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false)
+  const [showNewPassword, setShowNewPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [changingPassword, setChangingPassword] = useState(false)
 
   useEffect(() => { fetchData() }, [])
 
@@ -110,6 +135,105 @@ export function SettingsPage() {
     }))
   }
 
+  // Backup handler
+  const handleBackup = async () => {
+    setBackingUp(true)
+    try {
+      const res = await fetch('/api/backup')
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || 'Backup failed')
+      }
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const contentDisposition = res.headers.get('Content-Disposition')
+      const filename = contentDisposition
+        ? contentDisposition.split('filename=')[1]?.replace(/"/g, '')
+        : `attindo-backup-${new Date().toISOString().slice(0, 10)}.db`
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+      toast.success(isRTL ? 'تم إنشاء النسخة الاحتياطية بنجاح' : 'Backup created successfully')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to create backup')
+    } finally {
+      setBackingUp(false)
+    }
+  }
+
+  // Restore handler
+  const handleRestore = async (file: File) => {
+    setRestoring(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetch('/api/backup', {
+        method: 'POST',
+        body: formData,
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error || 'Restore failed')
+      }
+      toast.success(isRTL ? 'تم استعادة النسخة الاحتياطية بنجاح. يرجى تحديث الصفحة.' : 'Database restored successfully. Please refresh the page.')
+      // Reload after a short delay so the user sees the toast
+      setTimeout(() => window.location.reload(), 2000)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to restore backup')
+    } finally {
+      setRestoring(false)
+    }
+  }
+
+  // Change password handler
+  const handleChangePassword = async () => {
+    if (!user?.id) {
+      toast.error(isRTL ? 'لم يتم العثور على المستخدم' : 'User not found')
+      return
+    }
+    if (!currentPassword || !newPassword || !confirmNewPassword) {
+      toast.error(isRTL ? 'يرجى ملء جميع الحقول' : 'Please fill in all fields')
+      return
+    }
+    if (newPassword.length < 6) {
+      toast.error(isRTL ? 'كلمة المرور الجديدة يجب أن تكون 6 أحرف على الأقل' : 'New password must be at least 6 characters')
+      return
+    }
+    if (newPassword !== confirmNewPassword) {
+      toast.error(isRTL ? 'كلمات المرور غير متطابقة' : 'Passwords do not match')
+      return
+    }
+
+    setChangingPassword(true)
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          currentPassword,
+          newPassword,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to change password')
+      }
+      toast.success(isRTL ? 'تم تغيير كلمة المرور بنجاح' : 'Password changed successfully')
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmNewPassword('')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to change password')
+    } finally {
+      setChangingPassword(false)
+    }
+  }
+
   const settingLabel = (key: string): string => {
     const labels: Record<string, string> = {
       working_days: isRTL ? 'أيام العمل' : 'Working Days',
@@ -163,21 +287,27 @@ export function SettingsPage() {
       </div>
 
       <Tabs defaultValue="company" className="space-y-4">
-        <TabsList className="bg-slate-100">
-          <TabsTrigger value="company" className="gap-1.5 data-[state=active]:bg-white">
+        <TabsList className="bg-slate-100 flex flex-wrap h-auto gap-1 p-1">
+          <TabsTrigger value="company" className="gap-1.5 data-[state=active]:bg-white text-xs sm:text-sm">
             <Building2 className="w-3.5 h-3.5" /> {isRTL ? 'الشركة' : 'Company'}
           </TabsTrigger>
-          <TabsTrigger value="attendance" className="gap-1.5 data-[state=active]:bg-white">
+          <TabsTrigger value="attendance" className="gap-1.5 data-[state=active]:bg-white text-xs sm:text-sm">
             <Clock className="w-3.5 h-3.5" /> {isRTL ? 'الحضور' : 'Attendance'}
           </TabsTrigger>
-          <TabsTrigger value="payroll" className="gap-1.5 data-[state=active]:bg-white">
+          <TabsTrigger value="payroll" className="gap-1.5 data-[state=active]:bg-white text-xs sm:text-sm">
             <Banknote className="w-3.5 h-3.5" /> {isRTL ? 'الرواتب' : 'Payroll'}
           </TabsTrigger>
-          <TabsTrigger value="fingerprint" className="gap-1.5 data-[state=active]:bg-white">
+          <TabsTrigger value="fingerprint" className="gap-1.5 data-[state=active]:bg-white text-xs sm:text-sm">
             <Fingerprint className="w-3.5 h-3.5" /> {isRTL ? 'البصمة' : 'Fingerprint'}
           </TabsTrigger>
-          <TabsTrigger value="general" className="gap-1.5 data-[state=active]:bg-white">
+          <TabsTrigger value="general" className="gap-1.5 data-[state=active]:bg-white text-xs sm:text-sm">
             <Settings className="w-3.5 h-3.5" /> {isRTL ? 'عام' : 'General'}
+          </TabsTrigger>
+          <TabsTrigger value="backup" className="gap-1.5 data-[state=active]:bg-white text-xs sm:text-sm">
+            <Database className="w-3.5 h-3.5" /> {isRTL ? 'الباكاب' : 'Backup'}
+          </TabsTrigger>
+          <TabsTrigger value="security" className="gap-1.5 data-[state=active]:bg-white text-xs sm:text-sm">
+            <Key className="w-3.5 h-3.5" /> {isRTL ? 'الأمان' : 'Security'}
           </TabsTrigger>
         </TabsList>
 
@@ -279,6 +409,259 @@ export function SettingsPage() {
             </Card>
           </TabsContent>
         ))}
+
+        {/* Backup Tab */}
+        <TabsContent value="backup">
+          <div className="space-y-4">
+            {/* Create Backup */}
+            <Card className="border-0 shadow-sm">
+              <CardHeader className="pb-4">
+                <CardTitle className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                  <Download className="w-4 h-4 text-teal-600" />
+                  {isRTL ? 'إنشاء نسخة احتياطية' : 'Create Backup'}
+                </CardTitle>
+                <CardDescription className="text-xs text-slate-500">
+                  {isRTL
+                    ? 'قم بتنزيل نسخة احتياطية كاملة من قاعدة البيانات. يمكنك استخدامها لاستعادة البيانات لاحقاً.'
+                    : 'Download a complete backup of your database. You can use it to restore your data later.'}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button
+                  onClick={handleBackup}
+                  disabled={backingUp}
+                  className="bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white"
+                >
+                  {backingUp ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                      {isRTL ? 'جاري الإنشاء...' : 'Creating backup...'}
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-4 h-4 mr-2" />
+                      {isRTL ? 'تنزيل النسخة الاحتياطية' : 'Download Backup'}
+                    </>
+                  )}
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* Restore Backup */}
+            <Card className="border-0 shadow-sm">
+              <CardHeader className="pb-4">
+                <CardTitle className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                  <Upload className="w-4 h-4 text-amber-600" />
+                  {isRTL ? 'استعادة من نسخة احتياطية' : 'Restore from Backup'}
+                </CardTitle>
+                <CardDescription className="text-xs text-slate-500">
+                  {isRTL
+                    ? 'استعادة قاعدة البيانات من ملف نسخة احتياطية سابقة.'
+                    : 'Restore the database from a previous backup file.'}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Warning */}
+                <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-lg p-4">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-amber-800">
+                      {isRTL ? 'تحذير: سيتم استبدال جميع البيانات' : 'Warning: All data will be replaced'}
+                    </p>
+                    <p className="text-xs text-amber-700 mt-1">
+                      {isRTL
+                        ? 'ستؤدي عملية الاستعادة إلى استبدال جميع البيانات الحالية بالبيانات الموجودة في ملف النسخة الاحتياطية. لا يمكن التراجع عن هذا الإجراء.'
+                        : 'Restoring will replace all current data with the data in the backup file. This action cannot be undone.'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* File input (hidden) */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".db"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) {
+                      handleRestore(file)
+                    }
+                    // Reset the input so the same file can be selected again
+                    e.target.value = ''
+                  }}
+                />
+
+                <div className="flex items-center gap-3">
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className="border-amber-300 text-amber-700 hover:bg-amber-50"
+                        disabled={restoring}
+                        onClick={() => {
+                          // Don't open file picker yet, open confirmation first
+                        }}
+                      >
+                        {restoring ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                            {isRTL ? 'جاري الاستعادة...' : 'Restoring...'}
+                          </>
+                        ) : (
+                          <>
+                            <Upload className="w-4 h-4 mr-2" />
+                            {isRTL ? 'استعادة من نسخة احتياطية' : 'Restore from Backup'}
+                          </>
+                        )}
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle className="flex items-center gap-2">
+                          <AlertTriangle className="w-5 h-5 text-amber-600" />
+                          {isRTL ? 'تأكيد الاستعادة' : 'Confirm Restore'}
+                        </AlertDialogTitle>
+                        <AlertDialogDescription>
+                          {isRTL
+                            ? 'هل أنت متأكد من رغبتك في استعادة قاعدة البيانات من نسخة احتياطية؟ سيتم استبدال جميع البيانات الحالية ولا يمكن التراجع عن هذا الإجراء.'
+                            : 'Are you sure you want to restore the database from a backup? All current data will be replaced and this action cannot be undone.'}
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>{isRTL ? 'إلغاء' : 'Cancel'}</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={() => {
+                            fileInputRef.current?.click()
+                          }}
+                          className="bg-amber-600 hover:bg-amber-700 text-white"
+                        >
+                          {isRTL ? 'متابعة واختيار الملف' : 'Continue & Select File'}
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* Security Tab (Change Password) */}
+        <TabsContent value="security">
+          <Card className="border-0 shadow-sm">
+            <CardHeader className="pb-4">
+              <CardTitle className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                <Key className="w-4 h-4 text-teal-600" />
+                {isRTL ? 'تغيير كلمة المرور' : 'Change Password'}
+              </CardTitle>
+              <CardDescription className="text-xs text-slate-500">
+                {isRTL
+                  ? 'قم بتغيير كلمة مرور حسابك.'
+                  : 'Update your account password.'}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="max-w-md space-y-4">
+                {/* Current Password */}
+                <div className="space-y-2">
+                  <Label className="text-slate-700 text-sm font-medium">
+                    {isRTL ? 'كلمة المرور الحالية' : 'Current Password'}
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      type={showCurrentPassword ? 'text' : 'password'}
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      placeholder={isRTL ? 'أدخل كلمة المرور الحالية' : 'Enter current password'}
+                      className="h-11 border-slate-200 focus:border-teal-500 focus:ring-teal-500/20 pr-10"
+                      dir="ltr"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                    >
+                      {showCurrentPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* New Password */}
+                <div className="space-y-2">
+                  <Label className="text-slate-700 text-sm font-medium">
+                    {isRTL ? 'كلمة المرور الجديدة' : 'New Password'}
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      type={showNewPassword ? 'text' : 'password'}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder={isRTL ? '6 أحرف على الأقل' : 'At least 6 characters'}
+                      className="h-11 border-slate-200 focus:border-teal-500 focus:ring-teal-500/20 pr-10"
+                      dir="ltr"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                    >
+                      {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Confirm New Password */}
+                <div className="space-y-2">
+                  <Label className="text-slate-700 text-sm font-medium">
+                    {isRTL ? 'تأكيد كلمة المرور الجديدة' : 'Confirm New Password'}
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      value={confirmNewPassword}
+                      onChange={(e) => setConfirmNewPassword(e.target.value)}
+                      placeholder={isRTL ? 'أعد إدخال كلمة المرور الجديدة' : 'Re-enter new password'}
+                      className="h-11 border-slate-200 focus:border-teal-500 focus:ring-teal-500/20 pr-10"
+                      dir="ltr"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                    >
+                      {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {newPassword && confirmNewPassword && newPassword !== confirmNewPassword && (
+                  <p className="text-red-500 text-xs">
+                    {isRTL ? 'كلمات المرور غير متطابقة' : 'Passwords do not match'}
+                  </p>
+                )}
+
+                <Button
+                  onClick={handleChangePassword}
+                  disabled={changingPassword}
+                  className="bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white"
+                >
+                  {changingPassword ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                      {isRTL ? 'جاري التغيير...' : 'Changing...'}
+                    </>
+                  ) : (
+                    <>
+                      <Key className="w-4 h-4 mr-2" />
+                      {isRTL ? 'تغيير كلمة المرور' : 'Change Password'}
+                    </>
+                  )}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
     </div>
   )

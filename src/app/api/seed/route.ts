@@ -105,19 +105,7 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    // 2. Create admin user
-    await db.user.create({
-      data: {
-        username: 'admin',
-        password: 'admin123',
-        name: 'Administrator',
-        email: 'admin@attindo.com',
-        role: 'ADMIN',
-        isActive: true,
-      },
-    })
-
-    // 3. Create departments
+    // 2. Create departments
     const departments = []
     for (const deptData of DEPARTMENTS_DATA) {
       const dept = await db.department.create({

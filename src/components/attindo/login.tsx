@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAppStore } from '@/lib/store'
+import { SetupWizard } from '@/components/attindo/setup-wizard'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -15,8 +16,26 @@ export function Login() {
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [needsSetup, setNeedsSetup] = useState<boolean | null>(null)
+  const [checkingSetup, setCheckingSetup] = useState(true)
 
   const isRTL = language === 'ar'
+
+  useEffect(() => {
+    const checkSetup = async () => {
+      try {
+        const res = await fetch('/api/setup/check')
+        const data = await res.json()
+        setNeedsSetup(data.needsSetup)
+      } catch {
+        // If check fails, assume setup is needed
+        setNeedsSetup(true)
+      } finally {
+        setCheckingSetup(false)
+      }
+    }
+    checkSetup()
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -46,6 +65,34 @@ export function Login() {
     }
   }
 
+  const handleSetupComplete = (user: { id: string; username: string; name: string; email: string; role: string; isActive: boolean }) => {
+    setUser(user)
+    setAuthenticated(true)
+  }
+
+  // Show loading while checking if setup is needed
+  if (checkingSetup) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-teal-50 via-white to-emerald-50">
+        <div className="text-center">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-teal-500 to-emerald-600 shadow-lg shadow-teal-200 mb-4 animate-pulse">
+            <Fingerprint className="w-8 h-8 text-white" />
+          </div>
+          <div className="flex items-center gap-2 text-slate-500">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span className="text-sm">{isRTL ? 'جاري التحميل...' : 'Loading...'}</span>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Show setup wizard if no users exist
+  if (needsSetup) {
+    return <SetupWizard onComplete={handleSetupComplete} />
+  }
+
+  // Show login form
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-teal-50 via-white to-emerald-50 px-4">
       <div className="w-full max-w-md">
@@ -131,12 +178,6 @@ export function Login() {
                 )}
               </Button>
             </form>
-
-            <div className="mt-6 pt-4 border-t border-slate-100">
-              <p className="text-xs text-slate-400 text-center">
-                {isRTL ? 'الافتراضي: admin / admin123' : 'Default: admin / admin123'}
-              </p>
-            </div>
           </CardContent>
         </Card>
 
