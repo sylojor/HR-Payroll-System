@@ -23,7 +23,7 @@ function log(msg) {
 }
 
 log('=== Attindo Starting ===');
-log('Version: 1.0.0');
+log('Version: 1.2.0');
 log('Mode: ' + (isDev ? 'Development' : 'Production'));
 log('App Path: ' + app.getAppPath());
 log('Resources: ' + process.resourcesPath);
@@ -137,11 +137,19 @@ function startNextServer() {
       NODE_ENV: 'production',
     };
 
-    log('Starting server with env PORT=' + nextPort + ' HOSTNAME=0.0.0.0');
+    // CRITICAL: Use process.execPath (Electron binary) instead of 'node'
+    // because 'node' is not in PATH on user's Windows machine.
+    // ELECTRON_RUN_AS_NODE=1 makes Electron behave as plain Node.js.
+    const nodePath = process.execPath;
+    log('Node path (process.execPath): ' + nodePath);
+    log('Starting server with env PORT=' + nextPort + ' HOSTNAME=0.0.0.0 ELECTRON_RUN_AS_NODE=1');
 
     try {
-      nextServer = spawn('node', [serverPath], {
-        env,
+      nextServer = spawn(nodePath, [serverPath], {
+        env: {
+          ...env,
+          ELECTRON_RUN_AS_NODE: '1',
+        },
         cwd: standaloneDir,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
@@ -616,11 +624,15 @@ ipcMain.handle('window-maximize', () => {
 ipcMain.handle('window-close', () => mainWindow?.close());
 ipcMain.handle('retry-server', async () => {
   try {
+    showLoadingPage(mainWindow);
     await startNextServer();
-    await waitForServer(nextPort);
+    await waitForServer(nextPort, 20);
+    await seedViaApi();
     mainWindow.loadURL(`http://localhost:${nextPort}`);
     return true;
   } catch (e) {
+    log('Retry failed: ' + e.message);
+    showErrorPage(mainWindow, 'Retry failed: ' + e.message);
     return false;
   }
 });
