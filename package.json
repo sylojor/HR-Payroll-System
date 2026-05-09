@@ -64,16 +64,6 @@
       {
         "from": ".next/standalone",
         "to": "next-standalone",
-        "filter": ["**/*", "!**/node_modules/**"]
-      },
-      {
-        "from": ".next/standalone/.next/node_modules",
-        "to": "next-standalone/.next/node_modules",
-        "filter": ["**/*"]
-      },
-      {
-        "from": ".next/standalone/_deps",
-        "to": "next-standalone/_deps",
         "filter": ["**/*"]
       },
       {

@@ -157,17 +157,13 @@ function findNodeModulesPaths(standaloneDir) {
     log('.next/node_modules NOT found');
   }
 
-  // 3. _deps directory (our extra modules, not pruned by electron-builder)
+  // 3. _deps directory (fallback for extra modules)
   const depsNm = path.join(standaloneDir, '_deps');
   if (fs.existsSync(depsNm)) {
     paths.push(depsNm);
     log('Found _deps: ' + depsNm);
-    try {
-      const entries = fs.readdirSync(depsNm);
-      log('  _deps has ' + entries.length + ' entries: ' + entries.slice(0, 20).join(', '));
-    } catch (e) {}
   } else {
-    log('_deps directory NOT found');
+    log('_deps directory NOT found (not needed if .next/node_modules has everything)');
   }
 
   return paths;
