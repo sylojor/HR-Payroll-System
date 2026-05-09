@@ -1,0 +1,117 @@
+name: Build & Release Attindo
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., 1.0.0)'
+        required: true
+        default: '1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Generate Prisma Client
+        run: bun run db:generate
+
+      - name: Build Next.js
+        run: |
+          bun run build
+          xcopy /E /I /Y ".next\static" ".next\standalone\.next\static"
+          xcopy /E /I /Y "public" ".next\standalone\public"
+
+      - name: Copy Prisma files to standalone
+        run: |
+          xcopy /E /I /Y "prisma" ".next\standalone\prisma"
+          if exist "node_modules\.prisma" xcopy /E /I /Y "node_modules\.prisma" ".next\standalone\node_modules\.prisma"
+          if exist "node_modules\@prisma" xcopy /E /I /Y "node_modules\@prisma" ".next\standalone\node_modules\@prisma"
+
+      - name: Build Electron App (Windows)
+        run: npx electron-builder --win --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.VERSION }}
+          name: Attindo v${{ steps.version.outputs.VERSION }}
+          body: |
+            # 🏢 Attindo HR & Payroll System v${{ steps.version.outputs.VERSION }}
+
+            ## 📥 Download
+            Download **Attindo-Setup-${{ steps.version.outputs.VERSION }}.exe** to install Attindo on your Windows computer.
+
+            ## ✨ Features
+            - 🧑‍💼 Employee Management
+            - 🏢 Department & Position Management
+            - 👆 ZK Fingerprint Device Support (3 devices free)
+            - ⏰ Attendance Tracking
+            - 🏖️ Leave Management
+            - 💰 Payroll Processing
+            - 🔐 License Management
+            - ⚙️ Settings & Configuration
+
+            ## 📋 System Requirements
+            - Windows 10 or later (64-bit)
+            - 4 GB RAM minimum
+            - 500 MB disk space
+            - ZK Fingerprint Device (optional, for biometric attendance)
+
+            ## 🚀 Installation
+            1. Download `Attindo-Setup-${{ steps.version.outputs.VERSION }}.exe`
+            2. Run the installer
+            3. Follow the setup wizard
+            4. Launch Attindo from your desktop
+
+            ## 🔑 Default Login
+            - Username: `admin`
+            - Password: `admin123`
+
+            ## 📜 License Keys (Testing)
+            - HR Module: `ATT-HR-2025-PRO-001`
+            - Payroll Module: `ATT-PAY-2025-PRO-001`
+            - Fingerprint Pro: `ATT-FP-2025-PRO-010`
+
+            ---
+            *Built with ❤️ by Attindo Team*
+          draft: false
+          prerelease: false
+          files: |
+            release/Attindo-Setup-*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

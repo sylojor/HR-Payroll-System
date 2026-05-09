@@ -1,0 +1,82 @@
+# Attindo HR & Payroll System - Electron Builder Configuration
+
+appId: com.attindo.hr-payroll
+productName: Attindo
+copyright: Copyright © 2025 Attindo. All rights reserved.
+
+# Directories
+directories:
+  buildResources: build
+  output: release
+
+# Windows configuration
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.ico
+  artifactName: "Attindo-Setup-${version}.${ext}"
+
+# NSIS Installer configuration
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Attindo
+  include: build/installer.nsh
+
+# Files to include in the packaged app
+files:
+  - electron/**/*
+  - src/**/*
+  - prisma/**/*
+  - public/**/*
+  - scripts/**/*
+  - package.json
+  - next.config.ts
+  - tsconfig.json
+  - tailwind.config.ts
+  - postcss.config.mjs
+  - components.json
+
+# Extra resources - Next.js standalone build, Prisma, and database
+extraResources:
+  - from: ".next/standalone"
+    to: "next-standalone"
+  - from: ".next/static"
+    to: "next-standalone/.next/static"
+  - from: "public"
+    to: "next-standalone/public"
+  - from: "prisma"
+    to: "prisma"
+  - from: "node_modules/.prisma"
+    to: "next-standalone/node_modules/.prisma"
+  - from: "node_modules/@prisma"
+    to: "next-standalone/node_modules/@prisma"
+    filter:
+      - "**/*.js"
+      - "**/*.json"
+      - "**/*.node"
+      - "**/*.dll"
+      - "**/*.so"
+      - "**/*.dylib"
+
+# ASAR unpack
+asar: true
+asarUnpack:
+  - "**/*.node"
+  - "**/*.dll"
+  - "**/*.exe"
+  - "**/*.so"
+  - "**/*.dylib"
+
+# Publish to GitHub Releases
+publish:
+  provider: github
+  owner: sylojor
+  repo: HR-Payroll-System
