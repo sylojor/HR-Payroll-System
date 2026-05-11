@@ -176,6 +176,21 @@ const CREATE_TABLE_SQL = [
     FOREIGN KEY (departmentId) REFERENCES Department(id)
   )`,
 
+  `CREATE TABLE IF NOT EXISTS Shift (
+    id TEXT PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL,
+    nameAr TEXT NOT NULL DEFAULT '',
+    startTime TEXT NOT NULL DEFAULT '08:00',
+    endTime TEXT NOT NULL DEFAULT '17:00',
+    graceMinutes INTEGER NOT NULL DEFAULT 15,
+    overtimeThreshold REAL NOT NULL DEFAULT 8.0,
+    isDefault BOOLEAN NOT NULL DEFAULT 0,
+    color TEXT NOT NULL DEFAULT '#14B8A6',
+    daysOfWeek TEXT NOT NULL DEFAULT '0,1,2,3,4',
+    createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+
   `CREATE TABLE IF NOT EXISTS Employee (
     id TEXT PRIMARY KEY NOT NULL,
     employeeId TEXT NOT NULL UNIQUE,
@@ -192,6 +207,7 @@ const CREATE_TABLE_SQL = [
     emergencyContact TEXT NOT NULL DEFAULT '',
     departmentId TEXT NOT NULL,
     positionId TEXT NOT NULL,
+    shiftId TEXT NOT NULL DEFAULT '',
     hireDate DATETIME NOT NULL,
     salary REAL NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'ACTIVE',
@@ -204,7 +220,8 @@ const CREATE_TABLE_SQL = [
     createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (departmentId) REFERENCES Department(id),
-    FOREIGN KEY (positionId) REFERENCES Position(id)
+    FOREIGN KEY (positionId) REFERENCES Position(id),
+    FOREIGN KEY (shiftId) REFERENCES Shift(id)
   )`,
 
   `CREATE TABLE IF NOT EXISTS FingerprintDevice (

@@ -88,6 +88,27 @@ model Position {
 }
 
 // ============================================================
+// SHIFTS / SCHEDULES
+// ============================================================
+
+model Shift {
+  id          String   @id @default(cuid())
+  name        String
+  nameAr      String   @default("")
+  startTime   String   // e.g. "08:00"
+  endTime     String   // e.g. "17:00"
+  graceMinutes Int     @default(15)  // Late grace period in minutes
+  overtimeThreshold Float @default(8.0)  // Hours before overtime starts
+  isDefault   Boolean  @default(false)  // One shift should be default
+  color       String   @default("#14B8A6")  // Display color for calendar
+  daysOfWeek  String   @default("0,1,2,3,4")  // 0=Sun,1=Mon,...6=Sat (comma-separated)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  employees  Employee[]
+}
+
+// ============================================================
 // EMPLOYEES
 // ============================================================
 
@@ -107,6 +128,7 @@ model Employee {
   emergencyContact String  @default("")
   departmentId    String
   positionId      String
+  shiftId         String   @default("")
   hireDate        DateTime
   salary          Float    @default(0)
   status          String   @default("ACTIVE") // ACTIVE, INACTIVE, TERMINATED, ON_LEAVE
@@ -121,6 +143,7 @@ model Employee {
 
   department      Department @relation(fields: [departmentId], references: [id])
   position        Position   @relation(fields: [positionId], references: [id])
+  shift           Shift?     @relation(fields: [shiftId], references: [id])
   attendance      Attendance[]
   leaves          Leave[]
   payrollItems    PayrollItem[]

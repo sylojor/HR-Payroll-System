@@ -91,7 +91,8 @@ export function EmployeesPage() {
     hireDate: new Date().toISOString().split('T')[0],
   })
 
-  const isLocked = !licenseStatus.hr
+  // Employees are FREE - no license restriction
+  const isLocked = false
 
   useEffect(() => {
     fetchData()

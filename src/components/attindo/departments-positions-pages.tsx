@@ -45,9 +45,10 @@ interface Position {
 }
 
 export function DepartmentsPage() {
-  const { language, licenseStatus } = useAppStore()
+  const { language } = useAppStore()
   const isRTL = language === 'ar'
-  const isLocked = !licenseStatus.hr
+  // Departments are free - no license restriction
+  const isLocked = false
   const [departments, setDepartments] = useState<Department[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -197,9 +198,10 @@ export function DepartmentsPage() {
 }
 
 export function PositionsPage() {
-  const { language, licenseStatus } = useAppStore()
+  const { language } = useAppStore()
   const isRTL = language === 'ar'
-  const isLocked = !licenseStatus.hr
+  // Positions are free - no license restriction
+  const isLocked = false
   const [positions, setPositions] = useState<Position[]>([])
   const [departments, setDepartments] = useState<{ id: string; name: string }[]>([])
   const [loading, setLoading] = useState(true)

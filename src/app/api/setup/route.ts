@@ -150,12 +150,12 @@ export async function POST(request: NextRequest) {
       await db.settings.create({ data: setting })
     }
 
-    // 4. Create free fingerprint license
+    // 4. Create free fingerprint license (6 devices free)
     await db.license.create({
       data: {
-        key: 'FREE-FINGERPRINT-3',
+        key: 'FREE-FINGERPRINT-6',
         module: 'FINGERPRINT',
-        maxDevices: 3,
+        maxDevices: 6,
         activatedDevices: 0,
         activatedAt: new Date(),
         isActive: true,

@@ -143,10 +143,68 @@ export async function POST(request: NextRequest) {
       },
     })
 
+    // Auto-push employee to all active fingerprint devices (background, non-blocking)
+    pushEmployeeToDevices(employee).catch(() => {
+      // Silently ignore errors - this is a background operation
+    })
+
     return NextResponse.json({ employee }, { status: 201 })
   } catch (error) {
     console.error('Create employee error:', error)
     const message = error instanceof Error ? error.message : 'Failed to create employee'
     return NextResponse.json({ error: message }, { status: 500 })
+  }
+}
+
+/**
+ * Auto-push a newly created employee to all active fingerprint devices.
+ * This runs in the background and doesn't block the response.
+ */
+async function pushEmployeeToDevices(employee: { id: string; employeeId: string; firstName: string; lastName: string; fingerprintId: string }) {
+  try {
+    const devices = await db.fingerprintDevice.findMany({
+      where: { status: 'ACTIVE' },
+    })
+
+    if (devices.length === 0) return
+
+    const { ZKDevice } = await import('@/lib/zk-device')
+
+    // Determine the fingerprint ID for this employee
+    let fpId = parseInt(employee.fingerprintId) || 0
+    if (!fpId) {
+      const lastEmployee = await db.employee.findFirst({
+        where: { fingerprintId: { not: '' } },
+        orderBy: { fingerprintId: 'desc' },
+        select: { fingerprintId: true },
+      })
+      fpId = lastEmployee ? parseInt(lastEmployee.fingerprintId) + 1 : 1
+
+      // Update employee with the new fingerprint ID
+      await db.employee.update({
+        where: { id: employee.id },
+        data: { fingerprintId: String(fpId), fingerprintEnrolled: true },
+      })
+    }
+
+    for (const device of devices) {
+      try {
+        const zk = new ZKDevice(device.ip, device.port)
+        await zk.connect()
+        await zk.setUser({
+          uid: fpId,
+          userId: employee.employeeId,
+          name: `${employee.firstName} ${employee.lastName}`,
+          password: '',
+          role: 0,
+        })
+        await zk.disconnect()
+        console.log(`[auto-push] Employee ${employee.employeeId} pushed to device ${device.name}`)
+      } catch (err) {
+        console.error(`[auto-push] Failed to push to device ${device.name}:`, err instanceof Error ? err.message : err)
+      }
+    }
+  } catch (err) {
+    console.error('[auto-push] Error:', err instanceof Error ? err.message : err)
   }
 }

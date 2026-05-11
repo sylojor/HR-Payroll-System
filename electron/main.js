@@ -23,7 +23,7 @@ function log(msg) {
 }
 
 log('=== Attindo Starting ===');
-log('Version: 1.11.0');
+log('Version: 1.12.0');
 log('Mode: ' + (isDev ? 'Development' : 'Production'));
 log('App Path: ' + app.getAppPath());
 log('Resources: ' + process.resourcesPath);
@@ -457,6 +457,41 @@ async function autoInitializeDatabase() {
   }
 }
 
+// ========== AUTO-SYNC FINGERPRINT DEVICES ==========
+// On startup, automatically pull attendance logs from all active fingerprint devices
+async function autoSyncFingerprintDevices() {
+  try {
+    log('[auto-sync] Starting fingerprint auto-sync...');
+    const res = await fetch(`http://localhost:${nextPort}/api/fingerprint`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'auto_sync' }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success) {
+        log('[auto-sync] ✅ ' + data.message);
+        if (data.results && data.results.length > 0) {
+          for (const result of data.results) {
+            if (result.success) {
+              log(`[auto-sync] Device "${result.deviceName}": ${result.recordsSaved || 0} records synced`);
+            } else {
+              log(`[auto-sync] Device "${result.deviceName}": FAILED - ${result.error}`);
+            }
+          }
+        }
+      } else {
+        log('[auto-sync] ⚠️ Auto-sync returned: ' + (data.error || 'Unknown error'));
+      }
+    } else {
+      log('[auto-sync] ⚠️ Auto-sync request failed: HTTP ' + res.status);
+    }
+  } catch (e) {
+    log('[auto-sync] ⚠️ Auto-sync error: ' + e.message);
+  }
+}
+
 // ========== ERROR PAGE ==========
 function showErrorPage(window, errorMsg) {
   const html = `
@@ -601,7 +636,7 @@ function createSplashWindow() {
       <div class="title">Attindo</div>
       <div class="subtitle">HR & Payroll System</div>
       <div class="loader"><div class="loader-bar"></div></div>
-      <div class="version">v1.11.0</div>
+      <div class="version">v1.12.0</div>
     </body>
     </html>
   `;
@@ -646,7 +681,7 @@ function createMenu() {
             dialog.showMessageBox(mainWindow, {
               type: 'info', title: 'About Attindo',
               message: 'Attindo - HR & Payroll System',
-              detail: 'Version 1.11.0\n\nProfessional HR & Payroll Management System\n\nLog file: ' + logFile,
+              detail: 'Version 1.12.0\n\nProfessional HR & Payroll Management System\n\nLog file: ' + logFile,
             });
           },
         },
@@ -682,7 +717,7 @@ function createMenu() {
 }
 
 // ========== IPC ==========
-ipcMain.handle('get-app-version', () => '1.11.0');
+ipcMain.handle('get-app-version', () => '1.12.0');
 ipcMain.handle('get-database-path', () => getDatabasePath());
 ipcMain.handle('get-log-path', () => logFile);
 ipcMain.handle('show-open-dialog', async (e, opts) => dialog.showOpenDialog(mainWindow, opts));
@@ -760,7 +795,13 @@ app.whenReady().then(async () => {
       await autoInitializeDatabase();
     }
 
-    // Step 4: Show main window
+    // Step 4: Auto-sync fingerprint devices (pull attendance from all devices)
+    if (serverReady) {
+      log('--- Step 4: Auto-sync Fingerprint Devices ---');
+      await autoSyncFingerprintDevices();
+    }
+
+    // Step 5: Show main window
     if (splash) splash.close();
     createWindow();
     createMenu();

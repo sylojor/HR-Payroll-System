@@ -12,6 +12,7 @@ export type PageId =
   | 'departments'
   | 'positions'
   | 'holidays'
+  | 'shifts'
 
 interface User {
   id: string

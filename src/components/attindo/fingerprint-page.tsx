@@ -13,7 +13,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from '@/components/ui/dialog'
-import { Fingerprint, Plus, Lock, RefreshCw, Wifi, WifiOff, Trash2, AlertCircle } from 'lucide-react'
+import { Fingerprint, Plus, RefreshCw, Wifi, WifiOff, Download, Upload, Users, Zap, CheckCircle2, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
 
 interface Device {
@@ -46,6 +46,9 @@ export function FingerprintPage() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [syncingId, setSyncingId] = useState<string | null>(null)
+  const [pushingId, setPushingId] = useState<string | null>(null)
+  const [testingId, setTestingId] = useState<string | null>(null)
+  const [syncResult, setSyncResult] = useState<{ deviceId: string; recordsPulled: number; recordsSaved: number; errors?: string[] } | null>(null)
   const [form, setForm] = useState({ name: '', ip: '', port: '4370', location: '', sn: '' })
 
   useEffect(() => { fetchData() }, [])
@@ -101,23 +104,82 @@ export function FingerprintPage() {
     } finally { setSaving(false) }
   }
 
+  const handleTestConnection = async (deviceId: string) => {
+    setTestingId(deviceId)
+    try {
+      const res = await fetch('/api/fingerprint', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: deviceId, action: 'test' }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        toast.success(isRTL ? 'تم الاتصال بنجاح!' : 'Connection successful!', {
+          description: data.sn ? `SN: ${data.sn}` : '',
+        })
+      } else {
+        toast.error(isRTL ? 'فشل الاتصال' : 'Connection failed', {
+          description: data.error || '',
+        })
+      }
+      fetchData()
+    } catch {
+      toast.error('Network error')
+    } finally { setTestingId(null) }
+  }
+
   const handleSync = async (deviceId: string) => {
     setSyncingId(deviceId)
+    setSyncResult(null)
     try {
       const res = await fetch('/api/fingerprint', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: deviceId, action: 'sync' }),
       })
-      if (res.ok) {
-        toast.success(isRTL ? 'تمت المزامنة' : 'Sync completed')
+      const data = await res.json()
+      if (data.success) {
+        setSyncResult({ deviceId, recordsPulled: data.recordsPulled, recordsSaved: data.recordsSaved, errors: data.errors })
+        toast.success(
+          isRTL
+            ? `تم جلب ${data.recordsSaved} سجل حضور`
+            : `Synced ${data.recordsSaved} attendance records`,
+          {
+            description: isRTL
+              ? `تم سحب ${data.recordsPulled} سجل من الجهاز`
+              : `Pulled ${data.recordsPulled} logs from device`,
+          }
+        )
         fetchData()
       } else {
-        toast.error('Sync failed')
+        toast.error(isRTL ? 'فشلت المزامنة' : 'Sync failed', { description: data.error })
       }
     } catch {
       toast.error('Network error')
     } finally { setSyncingId(null) }
+  }
+
+  const handlePushAll = async (deviceId: string) => {
+    setPushingId(deviceId)
+    try {
+      const res = await fetch('/api/fingerprint', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: deviceId, action: 'push_all_employees' }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        toast.success(
+          isRTL
+            ? `تم رفع ${data.pushedCount} موظف`
+            : `Pushed ${data.pushedCount} employees to device`
+        )
+      } else {
+        toast.error(isRTL ? 'فشل رفع الموظفين' : 'Push failed', { description: data.error })
+      }
+    } catch {
+      toast.error('Network error')
+    } finally { setPushingId(null) }
   }
 
   const handleToggleStatus = async (deviceId: string, currentStatus: string) => {
@@ -135,8 +197,8 @@ export function FingerprintPage() {
     } catch { /* ignore */ }
   }
 
-  const isFreeTier = !licenseInfo?.active || (licenseInfo?.maxDevices ?? 3) <= 3
-  const maxDevices = licenseInfo?.maxDevices ?? 3
+  const isFreeTier = !licenseInfo?.active || (licenseInfo?.maxDevices ?? 6) <= 6
+  const maxDevices = licenseInfo?.maxDevices ?? 6
   const canAddMore = devices.length < maxDevices
 
   const statusBadge = (status: string) => {
@@ -166,7 +228,7 @@ export function FingerprintPage() {
             {isRTL ? 'أجهزة البصمة' : 'Fingerprint Devices'}
           </h1>
           <p className="text-slate-500 text-sm mt-1">
-            {isRTL ? 'إدارة أجهزة البصمة ZK' : 'Manage ZK fingerprint devices'}
+            {isRTL ? 'إدارة أجهزة البصمة ZK ومزامنة الحضور' : 'Manage ZK fingerprint devices & sync attendance'}
           </p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -204,7 +266,7 @@ export function FingerprintPage() {
               </div>
               <div className="space-y-2">
                 <Label>{isRTL ? 'الرقم التسلسلي' : 'Serial Number'}</Label>
-                <Input value={form.sn} onChange={(e) => setForm({ ...form, sn: e.target.value })} placeholder="ZK20250001" />
+                <Input value={form.sn} onChange={(e) => setForm({ ...form, sn: e.target.value })} placeholder="Auto-detected on sync" />
               </div>
               <Button
                 onClick={handleAddDevice}
@@ -219,17 +281,17 @@ export function FingerprintPage() {
       </div>
 
       {/* License Info Card */}
-      <Card className={`border-0 shadow-sm ${isFreeTier ? 'bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200' : 'bg-gradient-to-r from-teal-50 to-emerald-50'}`}>
+      <Card className={`border-0 shadow-sm ${isFreeTier ? 'bg-gradient-to-r from-teal-50 to-emerald-50 border border-teal-200' : 'bg-gradient-to-r from-teal-50 to-emerald-50'}`}>
         <CardContent className="p-5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className={`p-2.5 rounded-xl ${isFreeTier ? 'bg-amber-100' : 'bg-teal-100'}`}>
-                <Fingerprint className={`w-5 h-5 ${isFreeTier ? 'text-amber-600' : 'text-teal-600'}`} />
+              <div className="p-2.5 rounded-xl bg-teal-100">
+                <Fingerprint className="w-5 h-5 text-teal-600" />
               </div>
               <div>
                 <p className="text-sm font-semibold text-slate-800">
                   {isFreeTier
-                    ? isRTL ? 'الخطة المجانية - 3 أجهزة بصمة' : 'Free Tier - 3 Fingerprint Devices'
+                    ? isRTL ? `الخطة المجانية - ${maxDevices} أجهزة بصمة` : `Free Tier - ${maxDevices} Fingerprint Devices`
                     : isRTL ? 'ترخيص البصمة مفعل' : 'Fingerprint License Active'}
                 </p>
                 <p className="text-xs text-slate-500">
@@ -240,8 +302,8 @@ export function FingerprintPage() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Badge variant="outline" className={isFreeTier ? 'border-amber-200 text-amber-700' : 'border-teal-200 text-teal-700'}>
-                {isFreeTier ? (isRTL ? 'مجاني' : 'Free') : (isRTL ? 'مرخص' : 'Licensed')}
+              <Badge variant="outline" className="border-teal-200 text-teal-700 bg-teal-50">
+                {isRTL ? 'مجاني' : 'Free'}
               </Badge>
               {!canAddMore && (
                 <Badge variant="outline" className="border-red-200 text-red-700 bg-red-50">
@@ -253,7 +315,7 @@ export function FingerprintPage() {
           <div className="mt-3">
             <div className="w-full bg-slate-200 rounded-full h-2">
               <div
-                className={`h-2 rounded-full transition-all ${isFreeTier ? 'bg-amber-500' : 'bg-teal-500'}`}
+                className="h-2 rounded-full transition-all bg-teal-500"
                 style={{ width: `${Math.min((devices.length / maxDevices) * 100, 100)}%` }}
               />
             </div>
@@ -261,11 +323,38 @@ export function FingerprintPage() {
         </CardContent>
       </Card>
 
+      {/* Sync Result Banner */}
+      {syncResult && (
+        <Card className="border-0 shadow-sm bg-emerald-50 border border-emerald-200">
+          <CardContent className="p-4">
+            <div className="flex items-start gap-3">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-emerald-800">
+                  {isRTL ? `تم جلب ${syncResult.recordsSaved} سجل حضور` : `Synced ${syncResult.recordsSaved} attendance records`}
+                </p>
+                <p className="text-xs text-emerald-600">
+                  {isRTL
+                    ? `${syncResult.recordsPulled} سجل تم سحبه من الجهاز`
+                    : `${syncResult.recordsPulled} logs pulled from device`}
+                </p>
+                {syncResult.errors && syncResult.errors.length > 0 && (
+                  <div className="mt-2 text-xs text-red-600">
+                    {syncResult.errors.map((err, i) => <p key={i}>{err}</p>)}
+                  </div>
+                )}
+              </div>
+              <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setSyncResult(null)}>×</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Devices Grid */}
       {loading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {[1, 2, 3].map((i) => (
-            <Card key={i} className="animate-pulse"><CardContent className="p-6"><div className="h-32 bg-slate-200 rounded" /></CardContent></Card>
+            <Card key={i} className="animate-pulse"><CardContent className="p-6"><div className="h-48 bg-slate-200 rounded" /></CardContent></Card>
           ))}
         </div>
       ) : devices.length === 0 ? (
@@ -273,6 +362,9 @@ export function FingerprintPage() {
           <CardContent className="p-12 text-center">
             <Fingerprint className="w-12 h-12 text-slate-300 mx-auto mb-3" />
             <p className="text-slate-500">{isRTL ? 'لا توجد أجهزة بصمة' : 'No fingerprint devices'}</p>
+            <p className="text-slate-400 text-sm mt-1">
+              {isRTL ? 'أضف جهاز بصمة لبدء مزامنة الحضور' : 'Add a fingerprint device to start syncing attendance'}
+            </p>
           </CardContent>
         </Card>
       ) : (
@@ -294,7 +386,7 @@ export function FingerprintPage() {
                     {statusLabel(device.status)}
                   </Badge>
                 </div>
-                <div className="space-y-2 text-xs text-slate-600">
+                <div className="space-y-2 text-xs text-slate-600 mb-4">
                   <div className="flex justify-between">
                     <span className="text-slate-400">IP</span>
                     <span className="font-mono">{device.ip}:{device.port}</span>
@@ -305,36 +397,66 @@ export function FingerprintPage() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-400">{isRTL ? 'آخر مزامنة' : 'Last Sync'}</span>
-                    <span>{device.lastSync ? new Date(device.lastSync).toLocaleDateString() : '-'}</span>
+                    <span>{device.lastSync ? new Date(device.lastSync).toLocaleString() : '-'}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-400">{isRTL ? 'البرنامج' : 'Firmware'}</span>
                     <span>{device.firmware || '-'}</span>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 mt-4 pt-3 border-t border-slate-100">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleSync(device.id)}
-                    disabled={syncingId === device.id}
-                    className="flex-1 h-8 text-xs"
-                  >
-                    <RefreshCw className={`w-3 h-3 mr-1 ${syncingId === device.id ? 'animate-spin' : ''}`} />
-                    {isRTL ? 'مزامنة' : 'Sync'}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleToggleStatus(device.id, device.status)}
-                    className="flex-1 h-8 text-xs"
-                  >
-                    {device.status === 'ACTIVE' ? (
-                      <><WifiOff className="w-3 h-3 mr-1" />{isRTL ? 'إيقاف' : 'Disable'}</>
-                    ) : (
-                      <><Wifi className="w-3 h-3 mr-1" />{isRTL ? 'تفعيل' : 'Enable'}</>
-                    )}
-                  </Button>
+
+                {/* Action Buttons */}
+                <div className="space-y-2">
+                  {/* Primary Actions Row */}
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      className="flex-1 h-8 text-xs bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white"
+                      onClick={() => handleSync(device.id)}
+                      disabled={syncingId === device.id}
+                    >
+                      <Download className={`w-3 h-3 mr-1 ${syncingId === device.id ? 'animate-spin' : ''}`} />
+                      {syncingId === device.id
+                        ? (isRTL ? 'جاري المزامنة...' : 'Syncing...')
+                        : (isRTL ? 'جلب الحضور' : 'Pull Attendance')}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="flex-1 h-8 text-xs"
+                      onClick={() => handlePushAll(device.id)}
+                      disabled={pushingId === device.id}
+                    >
+                      <Upload className={`w-3 h-3 mr-1 ${pushingId === device.id ? 'animate-spin' : ''}`} />
+                      {isRTL ? 'رفع الموظفين' : 'Push Staff'}
+                    </Button>
+                  </div>
+
+                  {/* Secondary Actions Row */}
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleTestConnection(device.id)}
+                      disabled={testingId === device.id}
+                      className="flex-1 h-7 text-[11px]"
+                    >
+                      <Zap className={`w-3 h-3 mr-1 ${testingId === device.id ? 'animate-spin' : ''}`} />
+                      {isRTL ? 'اختبار اتصال' : 'Test'}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleToggleStatus(device.id, device.status)}
+                      className="flex-1 h-7 text-[11px]"
+                    >
+                      {device.status === 'ACTIVE' ? (
+                        <><WifiOff className="w-3 h-3 mr-1" />{isRTL ? 'إيقاف' : 'Disable'}</>
+                      ) : (
+                        <><Wifi className="w-3 h-3 mr-1" />{isRTL ? 'تفعيل' : 'Enable'}</>
+                      )}
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>

@@ -12,6 +12,7 @@ import {
   Building2,
   Briefcase,
   Clock,
+  CalendarClock,
   Fingerprint,
   CalendarDays,
   Banknote,
@@ -35,6 +36,7 @@ import { PayrollPage } from './payroll-page'
 import { LicensePage } from './license-page'
 import { SettingsPage } from './settings-page'
 import { HolidaysPage } from './holidays-page'
+import { ShiftsPage } from './shifts-page'
 
 interface NavItem {
   id: PageId
@@ -45,13 +47,14 @@ interface NavItem {
 }
 
 const hrNavItems: NavItem[] = [
-  { id: 'employees', label: 'Employees', labelAr: 'الموظفين', icon: Users, licenseKey: 'hr' },
-  { id: 'departments', label: 'Departments', labelAr: 'الأقسام', icon: Building2, licenseKey: 'hr' },
-  { id: 'positions', label: 'Positions', labelAr: 'المناصب', icon: Briefcase, licenseKey: 'hr' },
+  { id: 'employees', label: 'Employees', labelAr: 'الموظفين', icon: Users },
+  { id: 'departments', label: 'Departments', labelAr: 'الأقسام', icon: Building2 },
+  { id: 'positions', label: 'Positions', labelAr: 'المناصب', icon: Briefcase },
 ]
 
 const attendanceNavItems: NavItem[] = [
   { id: 'attendance', label: 'Attendance', labelAr: 'الحضور', icon: Clock },
+  { id: 'shifts', label: 'Shifts & Schedules', labelAr: 'الورديات والجداول', icon: CalendarClock },
   { id: 'fingerprint', label: 'Fingerprint Devices', labelAr: 'أجهزة البصمة', icon: Fingerprint, licenseKey: 'fingerprint' },
   { id: 'leave', label: 'Leave Management', labelAr: 'الإجازات', icon: CalendarDays },
 ]
@@ -159,6 +162,8 @@ export function AppShell() {
         return <PayrollPage />
       case 'holidays':
         return <HolidaysPage />
+      case 'shifts':
+        return <ShiftsPage />
       case 'license':
         return <LicensePage />
       case 'settings':
@@ -392,6 +397,7 @@ function getPageTitle(page: PageId): string {
     departments: 'Department Management',
     positions: 'Position Management',
     holidays: 'Holiday Management',
+    shifts: 'Shifts & Schedules',
   }
   return titles[page] || 'Dashboard'
 }
@@ -409,6 +415,7 @@ function getPageTitleAr(page: PageId): string {
     departments: 'إدارة الأقسام',
     positions: 'إدارة المناصب',
     holidays: 'إدارة العطلات',
+    shifts: 'الورديات والجداول',
   }
   return titles[page] || 'لوحة التحكم'
 }

@@ -9,7 +9,7 @@ on:
       version:
         description: 'Release version (e.g., 1.7.0)'
         required: true
-        default: '1.11.0'
+        default: '1.12.0'
 
 permissions:
   contents: write
@@ -238,14 +238,17 @@ jobs:
             - Payroll Module: `ATT-PAY-2025-PRO-001`
             - Fingerprint Pro: `ATT-FP-2025-PRO-010`
 
-            ## 🆕 What's New in v1.11.0
-            - 🔧 **CRITICAL FIX**: Fixed "Error code 14: Unable to open the database file" (proper fix this time!)
-            - ✅ Root cause: `file:///C:/path` (triple-slash) doesn't work with Prisma on Windows
-            - ✅ Changed DATABASE_URL to `file:C:/path` format which Prisma correctly parses
-            - ✅ Fixed in 3 places: electron/main.js, src/lib/db.ts, src/lib/db-schema.ts
-            - ✅ db.ts now normalizes DATABASE_URL before creating PrismaClient singleton
-            - ✅ All Prisma queries (not just raw SQL) now use the correct database URL
-            - ✅ No more Error code 14 - database connection works for ALL operations
+            ## 🆕 What's New in v1.12.0
+            - 👆 **REAL Fingerprint Communication**: ZK protocol library (port 4370) for actual device communication
+            - 📥 **Pull Attendance**: Sync button now pulls real attendance logs from ZK devices
+            - 👥 **Push Employees**: Push employee data to fingerprint devices automatically
+            - 🔄 **Auto-Sync on Startup**: System automatically syncs with all active devices on launch
+            - 🏷️ **Manual Pull Button**: One-click manual attendance pull from any device
+            - 🆓 **Free Employees**: No license restriction on employee count
+            - 🆓 **6 Free Fingerprint Devices**: Increased from 3 to 6 devices on free tier
+            - ⏰ **Shifts & Schedules**: Full shift management with time ranges, grace periods, overtime thresholds
+            - 🔄 **Auto-Push on Employee Creation**: New employees automatically pushed to all active devices
+            - 📊 **Shift-Based Attendance**: Late/early/overtime calculated based on employee's assigned shift
 
             ---
             *Built with ❤️ by Attindo Team*

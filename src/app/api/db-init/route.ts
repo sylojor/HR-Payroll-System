@@ -138,14 +138,14 @@ async function seedDefaultData() {
       }
     }
 
-    // Create default fingerprint license if none exists
+    // Create default fingerprint license if none exists (6 devices free)
     const existingLicense = await db.license.findFirst({ where: { module: 'FINGERPRINT' } })
     if (!existingLicense) {
       await db.license.create({
         data: {
-          key: 'FREE-FINGERPRINT-3',
+          key: 'FREE-FINGERPRINT-6',
           module: 'FINGERPRINT',
-          maxDevices: 3,
+          maxDevices: 6,
           activatedDevices: 0,
           activatedAt: new Date(),
           isActive: true,
