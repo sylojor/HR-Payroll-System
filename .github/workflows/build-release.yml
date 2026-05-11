@@ -9,7 +9,7 @@ on:
       version:
         description: 'Release version (e.g., 1.7.0)'
         required: true
-        default: '1.10.0'
+        default: '1.11.0'
 
 permissions:
   contents: write
@@ -238,13 +238,14 @@ jobs:
             - Payroll Module: `ATT-PAY-2025-PRO-001`
             - Fingerprint Pro: `ATT-FP-2025-PRO-010`
 
-            ## 🆕 What's New in v1.10.0
-            - 🔧 **CRITICAL FIX**: Fixed "Error code 14: Unable to open the database file"
-            - ✅ Now uses better-sqlite3 directly to create tables (bypasses Prisma URL parsing)
-            - ✅ Database is initialized BEFORE the server starts via init-db.js script
-            - ✅ Fixed DATABASE_URL format on Windows (file:///C:/... triple-slash)
-            - ✅ Three-layer initialization: template.db → init-db.js → API raw SQL fallback
-            - ✅ No more npx, no more Prisma URL parsing issues, no more Error code 14
+            ## 🆕 What's New in v1.11.0
+            - 🔧 **CRITICAL FIX**: Fixed "Error code 14: Unable to open the database file" (proper fix this time!)
+            - ✅ Root cause: `file:///C:/path` (triple-slash) doesn't work with Prisma on Windows
+            - ✅ Changed DATABASE_URL to `file:C:/path` format which Prisma correctly parses
+            - ✅ Fixed in 3 places: electron/main.js, src/lib/db.ts, src/lib/db-schema.ts
+            - ✅ db.ts now normalizes DATABASE_URL before creating PrismaClient singleton
+            - ✅ All Prisma queries (not just raw SQL) now use the correct database URL
+            - ✅ No more Error code 14 - database connection works for ALL operations
 
             ---
             *Built with ❤️ by Attindo Team*

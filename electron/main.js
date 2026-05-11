@@ -23,7 +23,7 @@ function log(msg) {
 }
 
 log('=== Attindo Starting ===');
-log('Version: 1.10.0');
+log('Version: 1.11.0');
 log('Mode: ' + (isDev ? 'Development' : 'Production'));
 log('App Path: ' + app.getAppPath());
 log('Resources: ' + process.resourcesPath);
@@ -46,18 +46,18 @@ function getDatabasePath() {
 function getDatabaseUrl() {
   const dbPath = getDatabasePath();
   let normalizedPath = dbPath.replace(/\\/g, '/');
-  // On Windows: file:///C:/Users/.../attindo.db (three slashes = absolute path)
-  // On Unix: file:///home/user/.../attindo.db
-  // This format is correctly parsed by both SQLite and Prisma
+  // CRITICAL: Prisma with better-sqlite3 on Windows requires file:C:/path format
+  // file:///C:/path (triple-slash) causes Error code 14: Unable to open database file
+  // file:C:/path (no slashes before drive letter) works correctly
   if (process.platform === 'win32') {
-    // Windows: C:/Users/... -> file:///C:/Users/...
-    return 'file:///' + normalizedPath;
+    // Windows: C:/Users/... -> file:C:/Users/...
+    return 'file:' + normalizedPath;
   } else {
-    // Unix: /home/user/... -> file:///home/user/...
+    // Unix: /home/user/... -> file:/home/user/...
     if (!normalizedPath.startsWith('/')) {
       normalizedPath = '/' + normalizedPath;
     }
-    return 'file://' + normalizedPath;
+    return 'file:' + normalizedPath;
   }
 }
 
@@ -601,7 +601,7 @@ function createSplashWindow() {
       <div class="title">Attindo</div>
       <div class="subtitle">HR & Payroll System</div>
       <div class="loader"><div class="loader-bar"></div></div>
-      <div class="version">v1.10.0</div>
+      <div class="version">v1.11.0</div>
     </body>
     </html>
   `;
@@ -646,7 +646,7 @@ function createMenu() {
             dialog.showMessageBox(mainWindow, {
               type: 'info', title: 'About Attindo',
               message: 'Attindo - HR & Payroll System',
-              detail: 'Version 1.10.0\n\nProfessional HR & Payroll Management System\n\nLog file: ' + logFile,
+              detail: 'Version 1.11.0\n\nProfessional HR & Payroll Management System\n\nLog file: ' + logFile,
             });
           },
         },
@@ -682,7 +682,7 @@ function createMenu() {
 }
 
 // ========== IPC ==========
-ipcMain.handle('get-app-version', () => '1.10.0');
+ipcMain.handle('get-app-version', () => '1.11.0');
 ipcMain.handle('get-database-path', () => getDatabasePath());
 ipcMain.handle('get-log-path', () => logFile);
 ipcMain.handle('show-open-dialog', async (e, opts) => dialog.showOpenDialog(mainWindow, opts));

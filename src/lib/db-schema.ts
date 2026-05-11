@@ -7,14 +7,48 @@
  * file bundled with the Electron app. This module serves as a fallback
  * for cases where the template database is not available.
  *
- * For Windows DATABASE_URL format fix:
- * - Electron sets DATABASE_URL with file:///C:/... (triple-slash)
- * - Prisma on Windows needs file:C:/... or file:///C:/... format
- * - This module ensures the URL is parsed correctly before use
+ * CRITICAL FIX (v1.11.0): Windows DATABASE_URL format
+ * - Prisma with better-sqlite3 on Windows requires file:C:/path format
+ * - file:///C:/path (triple-slash) causes Error code 14: Unable to open database file
+ * - Both electron/main.js and src/lib/db.ts now use file:C:/path format
+ * - This module also normalizes the URL before creating PrismaClient
  */
 
 import { existsSync, mkdirSync, writeFileSync } from 'fs'
 import path from 'path'
+
+/**
+ * Normalize DATABASE_URL to the format Prisma expects on the current platform.
+ * On Windows: file:///C:/path or file://C:/path -> file:C:/path
+ * On Unix: file:///path -> file:/path
+ *
+ * This is called before any PrismaClient instantiation.
+ */
+export function normalizeDatabaseUrl(): string {
+  const dbUrl = process.env.DATABASE_URL || ''
+  if (!dbUrl.startsWith('file:')) return dbUrl
+
+  const urlAfterFile = dbUrl.slice(5) // Remove 'file:'
+
+  if (process.platform === 'win32') {
+    // Windows: file:///C:/path -> file:C:/path
+    if (urlAfterFile.match(/^\/\/\/[A-Za-z]:\//)) {
+      const fixedUrl = 'file:' + urlAfterFile.replace(/^\/\/+/, '')
+      console.log('[db-schema] Normalizing DATABASE_URL:', dbUrl, '->', fixedUrl)
+      process.env.DATABASE_URL = fixedUrl
+      return fixedUrl
+    }
+    // Windows: file://C:/path -> file:C:/path
+    if (urlAfterFile.match(/^\/\/[A-Za-z]:\//)) {
+      const fixedUrl = 'file:' + urlAfterFile.replace(/^\/+/, '')
+      console.log('[db-schema] Normalizing DATABASE_URL:', dbUrl, '->', fixedUrl)
+      process.env.DATABASE_URL = fixedUrl
+      return fixedUrl
+    }
+  }
+
+  return dbUrl
+}
 
 /**
  * Extract the filesystem path from DATABASE_URL env variable.
@@ -343,20 +377,23 @@ const CREATE_TABLE_SQL = [
  * This is the FALLBACK method. The primary method is the template.db
  * file bundled with the Electron app, which is copied on first launch.
  *
- * This function handles DATABASE_URL correctly by:
- * 1. Ensuring the database file exists at the correct path
- * 2. Using Prisma to connect (which handles URL parsing internally)
- * 3. Creating tables with IF NOT EXISTS (safe to call multiple times)
+ * CRITICAL: Before creating any PrismaClient, we normalize the DATABASE_URL
+ * on Windows from file:///C:/path to file:C:/path. Without this,
+ * Prisma fails with "Error code 14: Unable to open the database file".
  */
 export async function createAllTables(): Promise<{ success: boolean; error?: string; dbPath?: string }> {
+  // Step 1: Normalize DATABASE_URL (fix Windows file:///C:/ -> file:C:/)
+  normalizeDatabaseUrl()
+
+  // Step 2: Ensure database file exists
   const dbPath = ensureDatabaseFile()
 
   if (!dbPath) {
     return { success: false, error: 'Cannot determine database path from DATABASE_URL' }
   }
 
+  // Step 3: Create tables via Prisma
   try {
-    // Dynamic import to get a fresh PrismaClient with correct connection
     const { PrismaClient } = await import('@prisma/client')
     const prisma = new PrismaClient()
 
@@ -373,23 +410,12 @@ export async function createAllTables(): Promise<{ success: boolean; error?: str
     const message = error instanceof Error ? error.message : 'Unknown error'
     console.error('[db-schema] Failed to create tables via Prisma:', message)
 
-    // If Prisma fails, try alternative DATABASE_URL formats
-    // This handles the Windows URL parsing edge cases
-    console.log('[db-schema] Attempting alternative DATABASE_URL format...')
-
+    // Last resort: try constructing URL from the file path directly
     try {
-      // Try rewriting DATABASE_URL to a format Prisma can handle
-      const originalUrl = process.env.DATABASE_URL
       const fixedPath = getDbFilePath()
-
-      if (fixedPath && originalUrl) {
-        // On Windows, try file:C:/path format (single colon, no slashes before drive)
-        let fixedUrl = originalUrl
-        if (process.platform === 'win32' || fixedPath.match(/^[A-Za-z]:\//)) {
-          // Convert to file:C:/Users/... format (Prisma prefers this on Windows)
-          fixedUrl = 'file:' + fixedPath.replace(/\\/g, '/')
-          console.log('[db-schema] Trying alternative URL:', fixedUrl)
-        }
+      if (fixedPath) {
+        const fixedUrl = 'file:' + fixedPath.replace(/\\/g, '/')
+        console.log('[db-schema] Last resort: trying URL from file path:', fixedUrl)
 
         process.env.DATABASE_URL = fixedUrl
         const { PrismaClient } = await import('@prisma/client')
@@ -399,19 +425,18 @@ export async function createAllTables(): Promise<{ success: boolean; error?: str
           for (const sql of CREATE_TABLE_SQL) {
             await prisma.$executeRawUnsafe(sql)
           }
-          console.log('[db-schema] Tables created with alternative URL format ✅')
+          console.log('[db-schema] Tables created with constructed URL ✅')
+          // Keep the working URL in env so subsequent PrismaClient uses it too
           return { success: true, dbPath }
         } finally {
           await prisma.$disconnect()
-          // Restore original URL
-          process.env.DATABASE_URL = originalUrl
         }
       }
 
       return { success: false, error: message, dbPath }
     } catch (altError) {
       const altMsg = altError instanceof Error ? altError.message : 'Unknown error'
-      console.error('[db-schema] Alternative URL also failed:', altMsg)
+      console.error('[db-schema] Constructed URL also failed:', altMsg)
       return { success: false, error: `Primary: ${message}. Alt: ${altMsg}. DB path: ${dbPath}`, dbPath }
     }
   }
